@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- Phone / Device Container -->
+    <path
+        android:pathData="M37,25 C34.8,25 33,26.8 33,29 L33,79 C33,81.2 34.8,83 37,83 L71,83 C73.2,83 75,81.2 75,79 L75,29 C75,26.8 73.2,25 71,25 L37,25 Z"
+        android:fillColor="#1E293B"
+        android:strokeWidth="2.5"
+        android:strokeColor="#38BDF8" />
+
+    <!-- Screen Inner -->
+    <path
+        android:pathData="M37,32 L71,32 L71,73 L37,73 Z"
+        android:fillColor="#0F172A" />
+
+    <!-- SMS Message Bubble -->
+    <path
+        android:pathData="M41,37 L67,37 C68.1,37 69,37.9 69,39 L69,49 C69,50.1 68.1,51 67,51 L46,51 L42,54 L42,51 L41,51 C39.9,51 39,50.1 39,39 C39,37.9 39.9,37 41,37 Z"
+        android:fillColor="#22C55E" />
+
+    <!-- SMS lines / BDT icon -->
+    <path
+        android:pathData="M44,42 L64,42 M44,46 L58,46"
+        android:strokeWidth="1.8"
+        android:strokeColor="#FFFFFF"
+        android:strokeLineCap="round" />
+
+    <!-- Sync Lightning & Forward Arrows -->
+    <!-- Sync Arrow Right-Up -->
+    <path
+        android:pathData="M43,62 L57,62 M52,57 L57,62 L52,67"
+        android:strokeWidth="2.5"
+        android:strokeColor="#38BDF8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- Cloud / Database Node -->
+    <path
+        android:pathData="M63,60 C63,58 65,56.5 67,57.5 C68.5,56 71,57 71,59 C72.5,59.5 73,61 72.5,62.5 C72,64 70.5,64.5 69,64.5 L63.5,64.5 C62.5,64.5 62,63.5 63,60 Z"
+        android:fillColor="#F59E0B" />
+
+    <!-- Speaker notch and home dot -->
+    <path
+        android:pathData="M50,28.5 L58,28.5"
+        android:strokeWidth="1.5"
+        android:strokeColor="#64748B"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M54,78 m -1.5, 0 a 1.5,1.5 0 1,0 3,0 a 1.5,1.5 0 1,0 -3,0"
+        android:fillColor="#94A3B8" />
+
+</vector>

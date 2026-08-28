@@ -1,0 +1,6 @@
+{
+  "name": "SMS Payment AutoSync",
+  "description": "Automated SMS payment processor that parses transaction data from bKash, Nagad, Rocket, Upay, Cellfin, and forwards to Supabase, custom webhooks, or cloud APIs in real-time.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
