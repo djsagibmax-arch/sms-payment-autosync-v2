@@ -10,7 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -25,6 +25,7 @@ import com.example.data.SyncLogEntity
 import com.example.model.ConnectionMode
 import com.example.model.SyncConfig
 import com.example.ui.theme.*
+import com.example.util.KeepAliveHelper
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -43,6 +44,10 @@ fun DashboardScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    var isBatteryIgnored by remember {
+        mutableStateOf(KeepAliveHelper.isBatteryOptimizationIgnored(context))
+    }
+    var showKeepAliveGuide by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = modifier
@@ -126,6 +131,111 @@ fun DashboardScreen(
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp
                         )
+                    }
+                }
+            }
+        }
+
+        // 24/7 Background Keep-Alive & Anti-Kill Card
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isBatteryIgnored) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f) else StatusFailed.copy(alpha = 0.1f)
+                ),
+                border = CardDefaults.outlinedCardBorder()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isBatteryIgnored) Icons.Default.Shield else Icons.Default.BatteryAlert,
+                                contentDescription = null,
+                                tint = if (isBatteryIgnored) StatusSuccess else StatusFailed,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Text(
+                                text = "24/7 Background Protection",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isBatteryIgnored) StatusSuccess.copy(alpha = 0.15f) else StatusFailed.copy(alpha = 0.15f)
+                        ) {
+                            Text(
+                                text = if (isBatteryIgnored) "Unrestricted ✓" else "Action Required ⚠",
+                                color = if (isBatteryIgnored) StatusSuccess else StatusFailed,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = if (isBatteryIgnored) {
+                            "Battery optimization is disabled. The app can receive SMS and sync payments even when the phone screen is locked or turned off."
+                        } else {
+                            "To keep this app alive 24/7 when closed from recent apps or screen is off, disable battery optimization and enable Auto-start."
+                        },
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (!isBatteryIgnored) {
+                            Button(
+                                onClick = {
+                                    KeepAliveHelper.requestIgnoreBatteryOptimization(context)
+                                    isBatteryIgnored = KeepAliveHelper.isBatteryOptimizationIgnored(context)
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = PrimaryIndigo),
+                                contentPadding = PaddingValues(vertical = 8.dp)
+                            ) {
+                                Icon(Icons.Default.Bolt, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Disable Battery Saver", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                KeepAliveHelper.openAutoStartSettings(context)
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(vertical = 8.dp)
+                        ) {
+                            Icon(Icons.Default.AppSettingsAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Auto-Start / App Info", fontSize = 12.sp)
+                        }
+
+                        IconButton(
+                            onClick = { showKeepAliveGuide = true },
+                            modifier = Modifier.size(38.dp)
+                        ) {
+                            Icon(Icons.Default.HelpOutline, contentDescription = "Help Guide", tint = PrimaryIndigo)
+                        }
                     }
                 }
             }
@@ -376,6 +486,95 @@ fun DashboardScreen(
                 RecentLogCard(log = log, onClick = { viewModel.selectLog(log) })
             }
         }
+    }
+
+    if (showKeepAliveGuide) {
+        AlertDialog(
+            onDismissRequest = { showKeepAliveGuide = false },
+            icon = {
+                Icon(Icons.Default.Shield, contentDescription = null, tint = PrimaryIndigo, modifier = Modifier.size(32.dp))
+            },
+            title = {
+                Text(
+                    text = "অ্যাপটি ২৪ ঘণ্টা চালু রাখার নিয়ম",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "মোবাইল স্ক্রিন বন্ধ থাকলেও বা রিসেন্ট অ্যাপস থেকে ক্লিয়ার করলেও অ্যাপ যাতে বন্ধ না হয়, সেজন্য নিচের সেটিংসগুলো নিশ্চিত করুন:",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "১. রিসেন্ট অ্যাপস-এ Lock 🔒 করুন:",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = PrimaryIndigo
+                            )
+                            Text(
+                                text = "রিসেন্ট অ্যাপস (Recent Apps) স্ক্রিনে গিয়ে এই অ্যাপের উপরে থাকা Lock আইকনে চাপ দিয়ে লক করে দিন যাতে সোয়াইপ করলেও অ্যাপ বন্ধ না হয়।",
+                                fontSize = 12.sp
+                            )
+
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "২. ব্যাটারি অপ্টিমাইজেশন (Unrestricted):",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = PrimaryIndigo
+                            )
+                            Text(
+                                text = "ব্যাটারি সেটিংসে গিয়ে অ্যাপটিকে 'Unrestricted' বা 'Don't Optimize' নির্বাচন করুন।",
+                                fontSize = 12.sp
+                            )
+
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "৩. অটো-স্টার্ট (Auto-start / iManager):",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = PrimaryIndigo
+                            )
+                            Text(
+                                text = "Vivo, Xiaomi বা Oppo মোবাইলে Auto-start এবং High Background Power Consumption অন রাখুন।",
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showKeepAliveGuide = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryIndigo)
+                ) {
+                    Text("বুঝেছি")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        KeepAliveHelper.openAutoStartSettings(context)
+                        showKeepAliveGuide = false
+                    }
+                ) {
+                    Text("সেটিংস খুলুন")
+                }
+            }
+        )
     }
 }
 

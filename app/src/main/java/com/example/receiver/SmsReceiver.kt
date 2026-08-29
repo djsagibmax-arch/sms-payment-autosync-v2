@@ -48,6 +48,14 @@ class SmsReceiver : BroadcastReceiver() {
         val fullMessage = fullBodyBuilder.toString()
         Log.d(TAG, "Incoming SMS from [$sender]: $fullMessage")
 
+        val powerManager = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+        val wakeLock = powerManager?.newWakeLock(
+            android.os.PowerManager.PARTIAL_WAKE_LOCK,
+            "SmsAutoSync:SmsProcessingWakeLock"
+        )?.apply {
+            acquire(30000L) // 30 seconds max to process SMS & Network request
+        }
+
         val pendingResult = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
@@ -55,6 +63,11 @@ class SmsReceiver : BroadcastReceiver() {
             } catch (e: Exception) {
                 Log.e(TAG, "Error handling incoming SMS: ${e.message}", e)
             } finally {
+                try {
+                    if (wakeLock?.isHeld == true) {
+                        wakeLock.release()
+                    }
+                } catch (ignored: Exception) {}
                 pendingResult.finish()
             }
         }

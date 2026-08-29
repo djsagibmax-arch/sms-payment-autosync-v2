@@ -1,9 +1,11 @@
 package com.example
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -31,11 +33,13 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.model.ConnectionMode
+import com.example.service.SyncForegroundService
 import com.example.ui.*
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.PrimaryIndigo
 import com.example.ui.theme.StatusFailed
 import com.example.ui.theme.StatusSuccess
+import com.example.util.KeepAliveHelper
 
 enum class AppNavTab(val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     DASHBOARD("Dashboard", Icons.Default.Dashboard),
@@ -48,15 +52,62 @@ enum class AppNavTab(val title: String, val icon: androidx.compose.ui.graphics.v
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
 
+    private val requiredPermissions: Array<String>
+        get() {
+            val list = mutableListOf(
+                Manifest.permission.RECEIVE_SMS,
+                Manifest.permission.READ_SMS
+            )
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                list.add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            return list.toTypedArray()
+        }
+
+    private val permissionRequestLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        val allGranted = result.values.all { it }
+        Log.d("MainActivity", "Permission auto-request result: allGranted=$allGranted, details=$result")
+        if (allGranted) {
+            // Automatically start the foreground service once permissions are granted
+            SyncForegroundService.start(this)
+            viewModel.refreshServiceState()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         viewModel.refreshServiceState()
 
+        // 1. Auto-request all runtime permissions on startup
+        checkAndRequestAllPermissions()
+
+        // 2. Auto-prompt battery optimization exemption for 24/7 background run if not yet granted
+        if (!KeepAliveHelper.isBatteryOptimizationIgnored(this)) {
+            KeepAliveHelper.requestIgnoreBatteryOptimization(this)
+        }
+
         setContent {
             MyApplicationTheme {
-                MainAppContent(viewModel = viewModel)
+                MainAppContent(viewModel = viewModel, onRecheckPermissions = {
+                    checkAndRequestAllPermissions()
+                })
             }
+        }
+    }
+
+    private fun checkAndRequestAllPermissions() {
+        val missingPermissions = requiredPermissions.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missingPermissions.isNotEmpty()) {
+            permissionRequestLauncher.launch(missingPermissions.toTypedArray())
+        } else {
+            // Already have permissions, ensure service is running
+            SyncForegroundService.start(this)
+            viewModel.refreshServiceState()
         }
     }
 
@@ -68,7 +119,10 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainAppContent(viewModel: MainViewModel) {
+fun MainAppContent(
+    viewModel: MainViewModel,
+    onRecheckPermissions: () -> Unit
+) {
     val context = LocalContext.current
     var currentTab by remember { mutableStateOf(AppNavTab.DASHBOARD) }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -83,7 +137,6 @@ fun MainAppContent(viewModel: MainViewModel) {
     val selectedLog by viewModel.selectedLog.collectAsStateWithLifecycle()
     val userMessage by viewModel.userMessage.collectAsStateWithLifecycle()
 
-    // Permissions check & request
     var hasSmsPermissions by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
@@ -94,6 +147,10 @@ fun MainAppContent(viewModel: MainViewModel) {
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         hasSmsPermissions = permissions[Manifest.permission.RECEIVE_SMS] == true
+        if (hasSmsPermissions) {
+            SyncForegroundService.start(context)
+            viewModel.refreshServiceState()
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -171,7 +228,7 @@ fun MainAppContent(viewModel: MainViewModel) {
                                     .background(if (isServiceRunning && hasSmsPermissions) StatusSuccess else StatusFailed)
                             )
                             Text(
-                                text = if (!hasSmsPermissions) "Grant SMS Perms" else if (isServiceRunning) "Running" else "Service Stopped",
+                                text = if (!hasSmsPermissions) "Grant Permissions" else if (isServiceRunning) "Running (24/7)" else "Service Stopped",
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if (isServiceRunning && hasSmsPermissions) StatusSuccess else StatusFailed
@@ -230,21 +287,24 @@ fun MainAppContent(viewModel: MainViewModel) {
                         ) {
                             Icon(Icons.Default.Warning, contentDescription = null, tint = StatusFailed, modifier = Modifier.size(20.dp))
                             Text(
-                                text = "SMS permissions required to listen for real payments.",
+                                text = "SMS & Notification permissions required for 24/7 AutoSync.",
                                 fontSize = 12.sp,
                                 color = StatusFailed
                             )
                         }
-                        TextButton(
+                        Button(
                             onClick = {
+                                onRecheckPermissions()
                                 val perms = mutableListOf(Manifest.permission.RECEIVE_SMS, Manifest.permission.READ_SMS)
                                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                                     perms.add(Manifest.permission.POST_NOTIFICATIONS)
                                 }
                                 permissionLauncher.launch(perms.toTypedArray())
-                            }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryIndigo),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
                         ) {
-                            Text("Grant", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("Allow All", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
                     }
                 }

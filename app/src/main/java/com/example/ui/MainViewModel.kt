@@ -76,6 +76,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _userMessage = MutableStateFlow<String?>(null)
     val userMessage: StateFlow<String?> = _userMessage.asStateFlow()
 
+    private val _simulationResult = MutableStateFlow<NetworkResult?>(null)
+    val simulationResult: StateFlow<NetworkResult?> = _simulationResult.asStateFlow()
+
+    private val _isSimulating = MutableStateFlow(false)
+    val isSimulating: StateFlow<Boolean> = _isSimulating.asStateFlow()
+
     fun updateConfig(newConfig: SyncConfig) {
         prefsManager.saveConfig(newConfig)
         _userMessage.value = "Settings saved successfully"
@@ -152,13 +158,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun clearSimulationResult() {
+        _simulationResult.value = null
+    }
+
     /**
      * Simulate an incoming SMS (for emulator & sandbox testing).
      */
-    fun simulateIncomingSms(context: Context, sender: String, body: String) {
+    fun simulateIncomingSms(context: Context, sender: String, body: String, customConfig: SyncConfig? = null) {
         viewModelScope.launch {
+            _isSimulating.value = true
+            _simulationResult.value = null
+            val cfg = customConfig ?: config.value
             val paymentData = SmsParser.parseSms(sender, body)
             if (paymentData == null) {
+                _isSimulating.value = false
+                val failResult = NetworkResult(
+                    isSuccess = false,
+                    statusCode = 0,
+                    responseBody = "Regex pattern did not match transaction data. Check format.",
+                    latencyMs = 0,
+                    errorMessage = "Regex match failed",
+                    endpointUsed = "SMS Parser"
+                )
+                _simulationResult.value = failResult
                 dao.insertLog(
                     SyncLogEntity(
                         timestamp = System.currentTimeMillis(),
@@ -181,11 +204,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
 
-            val result = NetworkManager.forwardPayment(context, config.value, paymentData)
+            val result = NetworkManager.forwardPayment(context, cfg, paymentData)
+            _simulationResult.value = result
+            _isSimulating.value = false
             if (result.isSuccess) {
-                _userMessage.value = "Simulated ${paymentData.method} SMS synced! (HTTP ${result.statusCode})"
+                _userMessage.value = "✓ Synced: ${paymentData.method} ৳${paymentData.amount}"
             } else {
-                _userMessage.value = "Simulated ${paymentData.method} parsed, sync failed (${result.errorMessage ?: "HTTP " + result.statusCode})"
+                _userMessage.value = "⚠ Sync issue: ${result.errorMessage ?: "HTTP " + result.statusCode}"
             }
         }
     }

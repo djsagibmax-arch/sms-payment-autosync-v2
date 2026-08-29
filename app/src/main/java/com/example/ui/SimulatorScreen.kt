@@ -18,6 +18,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.parser.SmsParser
 import com.example.ui.theme.*
 
@@ -35,6 +36,13 @@ fun SimulatorScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val config by viewModel.config.collectAsStateWithLifecycle()
+    val simulationResult by viewModel.simulationResult.collectAsStateWithLifecycle()
+    val isSimulating by viewModel.isSimulating.collectAsStateWithLifecycle()
+
+    var forwardToCustomApi by remember(config) { mutableStateOf(config.forwardToCustomApi) }
+    var forwardToSupabase by remember(config) { mutableStateOf(config.forwardToSupabase) }
+    var forwardToWebhook by remember(config) { mutableStateOf(config.forwardToWebhook) }
 
     val presets = remember {
         listOf(
@@ -151,7 +159,6 @@ fun SimulatorScreen(
                         rowPresets.forEach { preset ->
                             OutlinedCard(
                                 onClick = {
-                                    // Generate dynamic TrxID for variety
                                     val randomSuffix = (1000..9999).random()
                                     val updatedBody = preset.body.replace(
                                         Regex("""(?:TrxID|TxnID|TxnId|Trx ID)[:\s]+([A-Za-z0-9]+)"""),
@@ -262,25 +269,215 @@ fun SimulatorScreen(
             }
         }
 
+        // Active Forwarding Destinations Control Box
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = CardDefaults.outlinedCardBorder()
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Forward Target Destinations:",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
+                        Text(
+                            text = "Select all destinations to send",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        FilterChip(
+                            selected = forwardToCustomApi,
+                            onClick = {
+                                forwardToCustomApi = !forwardToCustomApi
+                                viewModel.updateConfig(config.copy(forwardToCustomApi = forwardToCustomApi))
+                            },
+                            label = { Text("Render API", fontSize = 12.sp) },
+                            leadingIcon = {
+                                if (forwardToCustomApi) Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp))
+                            }
+                        )
+
+                        FilterChip(
+                            selected = forwardToSupabase,
+                            onClick = {
+                                forwardToSupabase = !forwardToSupabase
+                                viewModel.updateConfig(config.copy(forwardToSupabase = forwardToSupabase))
+                            },
+                            label = { Text("Supabase DB", fontSize = 12.sp) },
+                            leadingIcon = {
+                                if (forwardToSupabase) Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp))
+                            }
+                        )
+
+                        FilterChip(
+                            selected = forwardToWebhook,
+                            onClick = {
+                                forwardToWebhook = !forwardToWebhook
+                                viewModel.updateConfig(config.copy(forwardToWebhook = forwardToWebhook))
+                            },
+                            label = { Text("Webhook", fontSize = 12.sp) },
+                            leadingIcon = {
+                                if (forwardToWebhook) Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp))
+                            }
+                        )
+                    }
+
+                    if (forwardToCustomApi) {
+                        Text(
+                            text = "• Render Target: ${config.customEndpointUrl.ifEmpty { "(No Render URL set in Connection tab)" }}",
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = if (config.customEndpointUrl.isBlank() || config.customEndpointUrl.contains("placeholder")) StatusFailed else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (forwardToSupabase) {
+                        Text(
+                            text = "• Supabase Table: ${config.supabaseTable} (${config.supabaseUrl.take(30)}...)",
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+
+        // Live Simulation Result Card
+        if (simulationResult != null) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (simulationResult!!.isSuccess) StatusSuccess.copy(alpha = 0.12f) else StatusFailed.copy(alpha = 0.12f)
+                    ),
+                    border = CardDefaults.outlinedCardBorder()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (simulationResult!!.isSuccess) Icons.Default.CheckCircle else Icons.Default.Error,
+                                    contentDescription = null,
+                                    tint = if (simulationResult!!.isSuccess) StatusSuccess else StatusFailed
+                                )
+                                Text(
+                                    text = if (simulationResult!!.isSuccess) "Forward Succeeded!" else "Forward Failed",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = if (simulationResult!!.isSuccess) StatusSuccess else StatusFailed
+                                )
+                            }
+                            Text(
+                                text = "${simulationResult!!.latencyMs} ms",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        Text(
+                            text = "Endpoints: ${simulationResult!!.endpointUsed}",
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        Text(
+                            text = "Status: HTTP ${simulationResult!!.statusCode}",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+
+                        if (!simulationResult!!.errorMessage.isNullOrBlank()) {
+                            Text(
+                                text = "Errors: ${simulationResult!!.errorMessage}",
+                                fontSize = 12.sp,
+                                color = StatusFailed
+                            )
+                        }
+
+                        if (simulationResult!!.responseBody.isNotBlank()) {
+                            Text(
+                                text = "Response Breakdown:\n${simulationResult!!.responseBody}",
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        TextButton(
+                            onClick = { viewModel.clearSimulationResult() },
+                            modifier = Modifier.align(Alignment.End)
+                        ) {
+                            Text("Dismiss", fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
+
         // Fire Button
         item {
             Button(
                 onClick = {
-                    viewModel.simulateIncomingSms(context, selectedSender, selectedBody)
+                    val activeConfig = config.copy(
+                        forwardToCustomApi = forwardToCustomApi,
+                        forwardToSupabase = forwardToSupabase,
+                        forwardToWebhook = forwardToWebhook
+                    )
+                    viewModel.simulateIncomingSms(context, selectedSender, selectedBody, activeConfig)
                 },
+                enabled = !isSimulating,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = PrimaryIndigo)
             ) {
-                Icon(imageVector = Icons.Default.Send, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Fire Simulated SMS & AutoSync",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
-                )
+                if (isSimulating) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Forwarding to Server(s)...", fontSize = 14.sp)
+                } else {
+                    Icon(imageVector = Icons.Default.Send, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Fire Simulated SMS & AutoSync",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                }
             }
         }
     }
