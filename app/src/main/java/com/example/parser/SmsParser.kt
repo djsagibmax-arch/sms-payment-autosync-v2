@@ -97,11 +97,14 @@ object SmsParser {
     }
 
     fun extractTrxId(body: String): String? {
-        // Look for TrxID, TxnID, Trx ID, Txn Id, TRX ID, Transaction ID, ID:
+        // Look for TrxID, TxnID, Trx ID, Txn Id, TRX ID, Transaction ID, ID:, Txn:, Trx:
         val patterns = listOf(
-            Pattern.compile("""(?:TrxID|TxnID|Trx\s*ID|Txn\s*Id|TRX\s*ID|Transaction\s*ID|Txn\s*no|Trans\s*ID)[:\s]+([A-Za-z0-9_]+)""", Pattern.CASE_INSENSITIVE),
+            Pattern.compile("""(?:TrxID|TxnID|Trx\s*ID|Txn\s*Id|TRX\s*ID|Transaction\s*ID|Txn\s*no|Trans\s*ID|Trx|Txn|ID)[:=\s]+([A-Za-z0-9_]+)""", Pattern.CASE_INSENSITIVE),
             Pattern.compile("""(?:TrxID|TxnID|TrxId|TxnId)\s*[:=\s]+([A-Za-z0-9_]+)""", Pattern.CASE_INSENSITIVE),
-            Pattern.compile("""ID[:\s]+([A-Za-z0-9]{8,14})""", Pattern.CASE_INSENSITIVE)
+            Pattern.compile("""\b(?:TrxID|TxnID)\b\s*([A-Za-z0-9]+)""", Pattern.CASE_INSENSITIVE),
+            Pattern.compile("""ID[:\s]+([A-Za-z0-9]{6,16})""", Pattern.CASE_INSENSITIVE),
+            // Fallback: standalone 8-14 char uppercase alphanumeric token
+            Pattern.compile("""\b([A-Z0-9]{8,14})\b""")
         )
 
         for (pattern in patterns) {
@@ -109,8 +112,12 @@ object SmsParser {
             if (matcher.find()) {
                 val match = matcher.group(1)?.trim()
                 if (!match.isNullOrEmpty() && match.length >= 4) {
-                    // Remove trailing punctuation if captured
-                    return match.trimEnd('.', ',', ';', ' ')
+                    val cleaned = match.trimEnd('.', ',', ';', ' ', ':')
+                    if (cleaned.any { it.isDigit() } && cleaned.any { it.isLetter() }) {
+                        return cleaned
+                    } else if (cleaned.length >= 6) {
+                        return cleaned
+                    }
                 }
             }
         }
@@ -119,12 +126,16 @@ object SmsParser {
 
     fun extractAmount(body: String): Double? {
         val patterns = listOf(
-            // Tk 1,500.00 or Tk. 1500 or BDT 1,250.50 or Amount: Tk 500
-            Pattern.compile("""(?:Amount\s*[:=\s]*)?(?:Tk|BDT|Tk\.|Tk\s*[:])\s*([0-9,]+(?:\.[0-9]{1,2})?)""", Pattern.CASE_INSENSITIVE),
+            // Tk 1,500.00 or Tk. 1500 or BDT 1,250.50 or Amount: Tk 500 or ৳ 500
+            Pattern.compile("""(?:Amount\s*[:=\s]*)?(?:Tk|BDT|Tk\.|Tk\s*[:]|\$|৳)\s*([0-9,]+(?:\.[0-9]{1,2})?)""", Pattern.CASE_INSENSITIVE),
+            // 500.00 Tk or 1200 BDT
+            Pattern.compile("""([0-9,]+(?:\.[0-9]{1,2})?)\s*(?:Tk|BDT|৳)""", Pattern.CASE_INSENSITIVE),
             // Amount: 1,500.00
             Pattern.compile("""Amount\s*[:=\s]+([0-9,]+(?:\.[0-9]{1,2})?)""", Pattern.CASE_INSENSITIVE),
             // received 500.00 BDT or Tk
-            Pattern.compile("""(?:received|received\s+payment|cash\s+in)\s+(?:of\s+)?(?:Tk\.?|BDT)?\s*([0-9,]+(?:\.[0-9]{1,2})?)""", Pattern.CASE_INSENSITIVE)
+            Pattern.compile("""(?:received|received\s+payment|cash\s+in|fee|transfer)\s+(?:of\s+)?(?:Tk\.?|BDT)?\s*([0-9,]+(?:\.[0-9]{1,2})?)""", Pattern.CASE_INSENSITIVE),
+            // Standalone number formatted like money: 1,200.00
+            Pattern.compile("""\b([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]{1,2})?)\b""")
         )
 
         for (pattern in patterns) {
@@ -147,7 +158,9 @@ object SmsParser {
             // UCB / Cellfin A/C 017...
             Pattern.compile("""A\/C\s*[:\s]*(\+?8801[0-9]{9}|01[0-9]{9})""", Pattern.CASE_INSENSITIVE),
             // Standard Bangladeshi Mobile Number anywhere after keywords
-            Pattern.compile("""(?:from|by|sender)\s+([0-9]{11,14})""", Pattern.CASE_INSENSITIVE)
+            Pattern.compile("""(?:from|by|sender)\s+([0-9]{11,14})""", Pattern.CASE_INSENSITIVE),
+            // Any 11-digit Bangladeshi mobile number starting with 01
+            Pattern.compile("""\b(01[3-9][0-9]{8})\b""")
         )
 
         for (pattern in patterns) {
