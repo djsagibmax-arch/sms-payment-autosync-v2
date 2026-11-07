@@ -98,11 +98,21 @@ data class SyncConfig(
     val chatbotWhatsAppEnabled: Boolean = true,
     val chatbotMessengerEnabled: Boolean = true,
     val geminiApiKey: String = "",
-    val geminiModel: String = "gemini-2.5-flash",
+    val geminiModel: String = "gemini-3.8-flash",
     val liveChatHandoverActive: Boolean = false,
     val chatbotAutoVerifyPayment: Boolean = true,
-    val chatbotCustomPrompt: String = DEFAULT_CHATBOT_PROMPT
+    val chatbotCustomPrompt: String = DEFAULT_CHATBOT_PROMPT,
+
+    // Custom Auto-Reply Settings (Fixed/Custom text reply instead of AI)
+    val customAutoReplyEnabled: Boolean = false,
+    val customAutoReplyMessage: String = DEFAULT_CUSTOM_AUTO_REPLY_MESSAGE
 )
+
+const val DEFAULT_CUSTOM_AUTO_REPLY_MESSAGE = """আসসালামু আলাইকুম {name}!
+Technography-তে স্বাগতম। আমাদের সব প্রিমিয়াম ডিজিটাল প্রোডাক্ট, কোর্স ও ভাইরাল রিলস বান্ডেল দেখতে ভিজিট করুন:
+🌐 https://technographybd.xyz
+
+যেকোনো প্রোডাক্ট সরাসরি কিনতে বা সহযোগিতার জন্য আপনার মেসেজটি রেখে দিন, আমরা শীঘ্রই রিপ্লাই দিচ্ছি।"""
 
 const val DEFAULT_CHATBOT_PROMPT = """তুমি Technography (বাংলাদেশের প্রিমিয়াম ডিজিটাল প্রোডাক্ট স্টোর)-এর একজন অত্যন্ত ভদ্র, বন্ধুসুলভ ও পারদর্শী সেলস অ্যাসিস্ট্যান্ট।
 কাস্টমারদের সাথে সম্পূর্ণ মানুষের মতো স্বাভাবিক, মধুর ও প্রফেশনাল বাংলায় কথা বলবে।

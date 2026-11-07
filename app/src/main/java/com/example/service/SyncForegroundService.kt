@@ -112,9 +112,19 @@ class SyncForegroundService : Service() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
-        Log.w(TAG, "App swiped from Recents! Scheduling immediate Auto-Restart...")
+        Log.w(TAG, "App task removed from Recents. Maintaining active foreground service and notification...")
+        isServiceRunning = true
+        acquireWakeLock()
 
-        // Schedule an immediate revival via AlarmManager & Broadcast
+        // Re-assert foreground notification immediately so it does not disappear
+        try {
+            val notification = buildNotification(0, 0.0)
+            startForeground(NOTIFICATION_ID, notification)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error re-asserting foreground notification: ${e.message}")
+        }
+
+        // Schedule restart backup via AlarmManager
         try {
             val restartIntent = Intent(applicationContext, RestartServiceReceiver::class.java).apply {
                 action = "com.example.RESTART_SERVICE"
@@ -136,9 +146,6 @@ class SyncForegroundService : Service() {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to schedule restart alarm: ${e.message}")
         }
-
-        // Direct restart attempt
-        start(applicationContext)
     }
 
     private fun monitorStats() {
@@ -177,15 +184,22 @@ class SyncForegroundService : Service() {
         val walletSummary = if (wallets.isEmpty()) "No wallets active" else wallets.joinToString(", ")
         val waStatus = if (config.whatsappAutomationEnabled) " • WhatsApp Auto: ON" else ""
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("SMS Payment AutoSync Running (24/7)")
             .setContentText("Listening: $walletSummary$waStatus • Synced: $successCount")
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setAutoCancel(false)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .build()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+        }
+
+        return builder.build()
     }
 
     private fun createNotificationChannel() {
@@ -193,10 +207,11 @@ class SyncForegroundService : Service() {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "SMS Background Monitor (24/7)",
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
                 description = "Keeps the SMS payment listener active non-stop in the background"
                 setShowBadge(false)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(channel)

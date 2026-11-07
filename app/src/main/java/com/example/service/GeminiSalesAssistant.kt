@@ -50,7 +50,7 @@ object GeminiSalesAssistant {
 
         val cleanedMsg = customerMessage.trim()
 
-        // 1. TrxID & Payment Verification Check
+        // 1. TrxID & Payment Verification Check (Auto-verifies TrxID and sends download link)
         if (config.chatbotAutoVerifyPayment) {
             val paymentReply = checkAndVerifyPayment(context, senderName, cleanedMsg, products, config)
             if (paymentReply != null) {
@@ -58,7 +58,19 @@ object GeminiSalesAssistant {
             }
         }
 
-        // 2. If Gemini API Key is configured, use Gemini API for human-like conversational sales!
+        // 2. Custom Fixed Auto-Reply (If Custom Reply Switch is ON)
+        if (config.customAutoReplyEnabled) {
+            val customText = config.customAutoReplyMessage
+                .replace("{name}", senderName)
+                .replace("{sender}", senderName)
+                .replace("{platform}", platformName)
+                .replace("{message}", cleanedMsg)
+            if (customText.isNotBlank()) {
+                return@withContext customText
+            }
+        }
+
+        // 3. If Gemini API Key is configured, use Gemini API for human-like conversational sales!
         if (config.geminiApiKey.isNotBlank()) {
             try {
                 val aiReply = callGeminiApi(config, senderName, cleanedMsg, products)
@@ -70,7 +82,7 @@ object GeminiSalesAssistant {
             }
         }
 
-        // 3. Fallback Rule-Based Human Sales Response (Works 100% even without API key)
+        // 4. Fallback Rule-Based Human Sales Response (Works 100% even without API key)
         return@withContext generateSmartFallback(senderName, cleanedMsg, products)
     }
 
@@ -154,8 +166,8 @@ $productListText
 
         val fullPrompt = "$systemInstruction\n\nকাস্টমার বলেছে: \"$message\"\n\nঅ্যাসিস্ট্যান্টের উত্তর:"
 
-        val model = config.geminiModel.ifBlank { "gemini-2.5-flash" }
-        val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=${config.geminiApiKey.trim()}"
+        val primaryModel = normalizeModelName(config.geminiModel.ifBlank { "gemini-3.8-flash" })
+        val candidateModels = listOf(primaryModel, "gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash").distinct()
 
         val jsonBody = JSONObject().apply {
             val contentsArr = JSONArray().apply {
@@ -175,29 +187,53 @@ $productListText
             })
         }
 
-        val request = Request.Builder()
-            .url(endpoint)
-            .post(jsonBody.toString().toRequestBody(JSON_MEDIA))
-            .build()
+        for (model in candidateModels) {
+            val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=${config.geminiApiKey.trim()}"
+            val request = Request.Builder()
+                .url(endpoint)
+                .post(jsonBody.toString().toRequestBody(JSON_MEDIA))
+                .build()
 
-        val response = httpClient.newCall(request).execute()
-        if (response.isSuccessful) {
-            val responseText = response.body?.string() ?: ""
-            val resJson = JSONObject(responseText)
-            val candidates = resJson.optJSONArray("candidates")
-            if (candidates != null && candidates.length() > 0) {
-                val firstCandidate = candidates.getJSONObject(0)
-                val content = firstCandidate.optJSONObject("content")
-                val parts = content?.optJSONArray("parts")
-                if (parts != null && parts.length() > 0) {
-                    val text = parts.getJSONObject(0).optString("text", "")
-                    return text.trim()
+            try {
+                val response = httpClient.newCall(request).execute()
+                if (response.isSuccessful) {
+                    val responseText = response.body?.string() ?: ""
+                    val resJson = JSONObject(responseText)
+                    val candidates = resJson.optJSONArray("candidates")
+                    if (candidates != null && candidates.length() > 0) {
+                        val firstCandidate = candidates.getJSONObject(0)
+                        val content = firstCandidate.optJSONObject("content")
+                        val parts = content?.optJSONArray("parts")
+                        if (parts != null && parts.length() > 0) {
+                            val text = parts.getJSONObject(0).optString("text", "")
+                            if (text.isNotBlank()) return text.trim()
+                        }
+                    }
+                } else {
+                    val errBody = response.body?.string() ?: ""
+                    Log.w(TAG, "Gemini API HTTP Error on model $model: ${response.code} $errBody")
                 }
+            } catch (e: Exception) {
+                Log.e(TAG, "Gemini call exception on model $model: ${e.message}")
             }
-        } else {
-            Log.w(TAG, "Gemini API HTTP Error: ${response.code} ${response.message}")
         }
         return ""
+    }
+
+    private fun normalizeModelName(raw: String): String {
+        val clean = raw.trim().removePrefix("models/").lowercase()
+        return when {
+            clean == "3.8 flash" || clean == "gemini-3.8-flash" -> "gemini-3.8-flash"
+            clean == "3.5 flash-lite" || clean == "gemini-3.5-flash-lite" -> "gemini-3.5-flash-lite"
+            clean == "3.1 pro" || clean == "gemini-3.1-pro" -> "gemini-3.1-pro"
+            clean == "4 argon" || clean == "gemini-4-argon" -> "gemini-4-argon"
+            clean.contains("3.8") -> "gemini-3.8-flash"
+            clean.contains("3.5") -> "gemini-3.5-flash-lite"
+            clean.contains("3.1") -> "gemini-3.1-pro"
+            clean.contains("argon") -> "gemini-4-argon"
+            clean.startsWith("gemini-") -> clean
+            else -> "gemini-$clean"
+        }
     }
 
     /**

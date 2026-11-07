@@ -173,9 +173,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _userMessage.value = "Bot resumed for $senderKey"
     }
 
-    fun testChatbotReply(context: Context, query: String, onResult: (String) -> Unit) {
+    fun clearBotActivities() {
+        com.example.service.SocialNotificationListenerService.clearBotActivities()
+        _userMessage.value = "বট অ্যাক্টিভিটি হিস্টোরি ক্লিয়ার করা হয়েছে"
+    }
+
+    fun testChatbotReply(context: Context, query: String, customConfig: SyncConfig? = null, onResult: (String) -> Unit) {
         viewModelScope.launch {
-            val currentCfg = config.value
+            val currentCfg = customConfig ?: config.value
             val response = com.example.service.GeminiSalesAssistant.generateReply(
                 context = context,
                 senderName = "Test Customer",

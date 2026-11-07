@@ -23,6 +23,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.model.DEFAULT_CHATBOT_PROMPT
 import com.example.model.SyncConfig
 import com.example.service.ChatbotActivityItem
@@ -50,6 +51,10 @@ fun ChatbotScreen(
     var prompt by remember(config) { mutableStateOf(config.chatbotCustomPrompt) }
     var autoVerify by remember(config) { mutableStateOf(config.chatbotAutoVerifyPayment) }
     var liveChatHandover by remember(config) { mutableStateOf(config.liveChatHandoverActive) }
+
+    // Custom Auto-Reply State (Non-AI fixed/custom reply)
+    var isCustomReplyEnabled by remember(config) { mutableStateOf(config.customAutoReplyEnabled) }
+    var customReplyMessage by remember(config) { mutableStateOf(config.customAutoReplyMessage) }
 
     var showApiKey by remember { mutableStateOf(false) }
     var showPromptEditor by remember { mutableStateOf(false) }
@@ -285,6 +290,174 @@ fun ChatbotScreen(
             }
         }
 
+        // Custom Auto-Reply Card (On/Off Switch & Custom Message Editor)
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("card_custom_auto_reply"),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                shape = CircleShape,
+                                color = Color(0xFF25D366).copy(alpha = 0.15f),
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.ChatBubble,
+                                        contentDescription = null,
+                                        tint = Color(0xFF25D366),
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "কাস্টম অটো-রিপ্লাই সেটআপ",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = if (isCustomReplyEnabled) "কাস্টম টেক্সট দিয়ে রিপ্লাই সক্রিয়" else "কাস্টম রিপ্লাই বন্ধ (AI রিপ্লাই সক্রিয়)",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (isCustomReplyEnabled) Color(0xFF25D366) else MaterialTheme.colorScheme.outline,
+                                    fontWeight = if (isCustomReplyEnabled) FontWeight.SemiBold else FontWeight.Normal
+                                )
+                            }
+                        }
+
+                        Switch(
+                            checked = isCustomReplyEnabled,
+                            onCheckedChange = {
+                                isCustomReplyEnabled = it
+                                viewModel.updateConfig(
+                                    config.copy(
+                                        customAutoReplyEnabled = it,
+                                        customAutoReplyMessage = customReplyMessage
+                                    )
+                                )
+                            },
+                            modifier = Modifier.testTag("switch_custom_reply")
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "সুইচটি চালু রাখলে কাস্টমার মেসেজ দিলে কোনো এআই ছাড়াই আপনার নির্ধারিত এই নির্দিষ্ট বার্তাটি স্বয়ংক্রিয়ভাবে রিপ্লাই চলে যাবে।",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    AnimatedVisibility(visible = isCustomReplyEnabled) {
+                        Column(modifier = Modifier.padding(top = 12.dp)) {
+                            Text(
+                                text = "কাস্টম রিপ্লাই বার্তা এডিট করুন:",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            OutlinedTextField(
+                                value = customReplyMessage,
+                                onValueChange = { customReplyMessage = it },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 120.dp, max = 220.dp)
+                                    .testTag("input_custom_reply_message"),
+                                placeholder = { Text("আপনার কাস্টম বার্তা এখানে লিখুন...") },
+                                supportingText = {
+                                    Text("ব্যবহারযোগ্য ট্যাগ: {name} = কাস্টমারের নাম, {platform} = WhatsApp/Messenger")
+                                }
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // Live Preview Box
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Default.Visibility,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "লাইভ প্রিভিউ (কাস্টমার যেভাবে দেখবেন):",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = customReplyMessage
+                                            .replace("{name}", "সজীব হাসান")
+                                            .replace("{platform}", "WhatsApp"),
+                                        fontSize = 12.sp,
+                                        lineHeight = 18.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                TextButton(
+                                    onClick = {
+                                        customReplyMessage = com.example.model.DEFAULT_CUSTOM_AUTO_REPLY_MESSAGE
+                                    }
+                                ) {
+                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("ডিফল্ট বার্তা রিস্টোর", fontSize = 12.sp)
+                                }
+
+                                Button(
+                                    onClick = {
+                                        viewModel.updateConfig(
+                                            config.copy(
+                                                customAutoReplyEnabled = isCustomReplyEnabled,
+                                                customAutoReplyMessage = customReplyMessage
+                                            )
+                                        )
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                                ) {
+                                    Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("সেভ করুন", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Gemini AI API Configuration Card
         item {
             Card(
@@ -341,19 +514,59 @@ fun ChatbotScreen(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Model Selection
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        listOf("gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-pro").forEach { model ->
-                            FilterChip(
-                                selected = selectedModel == model,
-                                onClick = { selectedModel = model },
-                                label = { Text(model) }
-                            )
+                    Text(
+                        text = "Gemini মডেল নির্বাচন করুন (আপডেট মডেল):",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    val modelOptions = listOf(
+                        "gemini-3.8-flash" to "3.8 Flash (All-around)",
+                        "gemini-3.5-flash-lite" to "3.5 Flash-Lite (Fast)",
+                        "gemini-3.1-pro" to "3.1 Pro (Reasoning)",
+                        "gemini-4-argon" to "4 Argon (Complex)"
+                    )
+
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            modelOptions.take(2).forEach { (modelId, label) ->
+                                FilterChip(
+                                    selected = selectedModel == modelId,
+                                    onClick = { selectedModel = modelId },
+                                    label = { Text(label, fontSize = 11.sp, fontWeight = if (selectedModel == modelId) FontWeight.Bold else FontWeight.Normal) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            modelOptions.drop(2).forEach { (modelId, label) ->
+                                FilterChip(
+                                    selected = selectedModel == modelId,
+                                    onClick = { selectedModel = modelId },
+                                    label = { Text(label, fontSize = 11.sp, fontWeight = if (selectedModel == modelId) FontWeight.Bold else FontWeight.Normal) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
                         }
                     }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    OutlinedTextField(
+                        value = selectedModel,
+                        onValueChange = { selectedModel = it },
+                        label = { Text("মডেল নাম / কাস্টম মডেল") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
 
                     Spacer(modifier = Modifier.height(12.dp))
 
@@ -403,7 +616,9 @@ fun ChatbotScreen(
                                     geminiModel = selectedModel,
                                     chatbotCustomPrompt = prompt.trim(),
                                     chatbotAutoVerifyPayment = autoVerify,
-                                    liveChatHandoverActive = liveChatHandover
+                                    liveChatHandoverActive = liveChatHandover,
+                                    customAutoReplyEnabled = isCustomReplyEnabled,
+                                    customAutoReplyMessage = customReplyMessage
                                 )
                             )
                         },
@@ -429,18 +644,45 @@ fun ChatbotScreen(
                 )
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Science,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "লাইভ চ্যাট সিমুলেটর (টেস্ট করুন)",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Science,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "লাইভ চ্যাট সিমুলেটর (টেস্ট করুন)",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        if (simulatorChatHistory.isNotEmpty()) {
+                            TextButton(
+                                onClick = { simulatorChatHistory = emptyList() },
+                                modifier = Modifier.testTag("btn_clear_simulator_chat")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.DeleteSweep,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "চ্যাট মুছুন",
+                                    color = MaterialTheme.colorScheme.error,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(4.dp))
@@ -463,35 +705,88 @@ fun ChatbotScreen(
                             .padding(12.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        simulatorChatHistory.forEach { (sender, msg) ->
-                            val isCustomer = sender == "কাস্টমার"
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = if (isCustomer) Arrangement.End else Arrangement.Start
+                        if (simulatorChatHistory.isEmpty()) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 12.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Surface(
-                                    shape = RoundedCornerShape(
-                                        topStart = 12.dp,
-                                        topEnd = 12.dp,
-                                        bottomStart = if (isCustomer) 12.dp else 2.dp,
-                                        bottomEnd = if (isCustomer) 2.dp else 12.dp
-                                    ),
-                                    color = if (isCustomer) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer,
-                                    modifier = Modifier.widthIn(max = 280.dp)
+                                Text(
+                                    text = "কোনো টেস্ট মেসেজ নেই।",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                OutlinedButton(
+                                    onClick = {
+                                        simulatorChatHistory = listOf(
+                                            "কাস্টমার" to "ভাই আপনাদের মেগা বান্ডেলটায় কি কি আছে?",
+                                            "বট" to "ধন্যবাদ সম্মানিত গ্রাহক! আমাদের 'Mega Bundle (All in One)'-এ পাচ্ছেন দেড় লক্ষ রিলস, ভাইরাল শর্টস ও মেগা ড্রাইভ অ্যাক্সেস মাত্র ৩০০ ৳। আপনি কি এটি নিতে চান?"
+                                        )
+                                    },
+                                    shape = RoundedCornerShape(8.dp)
                                 ) {
-                                    Column(modifier = Modifier.padding(10.dp)) {
-                                        Text(
-                                            text = sender,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (isCustomer) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
-                                        )
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            text = msg,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = if (isCustomer) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer
-                                        )
+                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("ডেমো চ্যাট লোড করুন", fontSize = 12.sp)
+                                }
+                            }
+                        } else {
+                            simulatorChatHistory.forEachIndexed { index, (sender, msg) ->
+                                val isCustomer = sender == "কাস্টমার"
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = if (isCustomer) Arrangement.End else Arrangement.Start,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Surface(
+                                        shape = RoundedCornerShape(
+                                            topStart = 12.dp,
+                                            topEnd = 12.dp,
+                                            bottomStart = if (isCustomer) 12.dp else 2.dp,
+                                            bottomEnd = if (isCustomer) 2.dp else 12.dp
+                                        ),
+                                        color = if (isCustomer) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer,
+                                        modifier = Modifier.widthIn(max = 280.dp)
+                                    ) {
+                                        Column(modifier = Modifier.padding(10.dp)) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = sender,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (isCustomer) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f) else MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f)
+                                                )
+                                                IconButton(
+                                                    onClick = {
+                                                        val list = simulatorChatHistory.toMutableList()
+                                                        if (index in list.indices) {
+                                                            list.removeAt(index)
+                                                            simulatorChatHistory = list
+                                                        }
+                                                    },
+                                                    modifier = Modifier.size(18.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Close,
+                                                        contentDescription = "মেসেজ মুছুন",
+                                                        tint = if (isCustomer) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f),
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = msg,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = if (isCustomer) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -544,7 +839,19 @@ fun ChatbotScreen(
                                     simulatorInput = ""
                                     isTestingChat = true
 
-                                    viewModel.testChatbotReply(context, text) { reply ->
+                                    viewModel.testChatbotReply(
+                                        context = context,
+                                        query = text,
+                                        customConfig = config.copy(
+                                            chatbotEnabled = isEnabled,
+                                            geminiApiKey = apiKey.trim(),
+                                            geminiModel = selectedModel,
+                                            chatbotCustomPrompt = prompt.trim(),
+                                            chatbotAutoVerifyPayment = autoVerify,
+                                            customAutoReplyEnabled = isCustomReplyEnabled,
+                                            customAutoReplyMessage = customReplyMessage
+                                        )
+                                    ) { reply ->
                                         simulatorChatHistory = newHistory + ("বট" to reply)
                                         isTestingChat = false
                                     }
@@ -605,6 +912,22 @@ fun ChatbotScreen(
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
                             )
+                        }
+
+                        if (botActivities.isNotEmpty()) {
+                            TextButton(
+                                onClick = { viewModel.clearBotActivities() },
+                                modifier = Modifier.testTag("btn_clear_bot_activities")
+                            ) {
+                                Icon(
+                                    Icons.Default.DeleteOutline,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("মুছুন", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                            }
                         }
                     }
 

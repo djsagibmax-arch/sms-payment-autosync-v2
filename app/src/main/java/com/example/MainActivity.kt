@@ -85,12 +85,16 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         viewModel.refreshServiceState()
 
-        // 1. Auto-request all runtime permissions on startup
-        checkAndRequestAllPermissions()
+        val sp = getSharedPreferences("app_launch_prefs", Context.MODE_PRIVATE)
+        val hasPromptedInitial = sp.getBoolean("has_prompted_initial_permissions", false)
 
-        // 2. Auto-prompt battery optimization exemption for 24/7 background run if not yet granted
-        if (!KeepAliveHelper.isBatteryOptimizationIgnored(this)) {
-            KeepAliveHelper.requestIgnoreBatteryOptimization(this)
+        val hasSms = ContextCompat.checkSelfPermission(this, Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
+        if (hasSms) {
+            SyncForegroundService.start(this)
+            viewModel.refreshServiceState()
+        } else if (!hasPromptedInitial) {
+            sp.edit().putBoolean("has_prompted_initial_permissions", true).apply()
+            checkAndRequestAllPermissions()
         }
 
         setContent {
@@ -149,25 +153,8 @@ fun MainAppContent(
         )
     }
 
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        hasSmsPermissions = permissions[Manifest.permission.RECEIVE_SMS] == true
-        if (hasSmsPermissions) {
-            SyncForegroundService.start(context)
-            viewModel.refreshServiceState()
-        }
-    }
-
     LaunchedEffect(Unit) {
-        val permissionsToRequest = mutableListOf(
-            Manifest.permission.RECEIVE_SMS,
-            Manifest.permission.READ_SMS
-        )
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-        permissionLauncher.launch(permissionsToRequest.toTypedArray())
+        hasSmsPermissions = ContextCompat.checkSelfPermission(context, Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
     }
 
     LaunchedEffect(userMessage) {
@@ -313,8 +300,9 @@ fun MainAppContent(
                 isBatteryIgnored = KeepAliveHelper.isBatteryOptimizationIgnored(context)
             }
 
+            var isBannerDismissed by remember { mutableStateOf(false) }
             val needsAnyPermission = !hasSmsPermissions || !isBatteryIgnored || !waState.isAccessibilityEnabled || !isNotifAccessGranted
-            if (needsAnyPermission) {
+            if (needsAnyPermission && !isBannerDismissed) {
                 Surface(
                     color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f),
                     modifier = Modifier.fillMaxWidth()
@@ -325,14 +313,26 @@ fun MainAppContent(
                             .padding(horizontal = 16.dp, vertical = 10.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Icon(Icons.Default.Warning, contentDescription = null, tint = StatusFailed, modifier = Modifier.size(18.dp))
-                            Text(
-                                text = "প্রয়োজনীয় পারমিশন সেটআপ (Required Setup)",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp,
-                                color = StatusFailed
-                            )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Icon(Icons.Default.Warning, contentDescription = null, tint = StatusFailed, modifier = Modifier.size(18.dp))
+                                Text(
+                                    text = "প্রয়োজনীয় পারমিশন সেটআপ (Required Setup)",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = StatusFailed
+                                )
+                            }
+                            IconButton(
+                                onClick = { isBannerDismissed = true },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = StatusFailed, modifier = Modifier.size(16.dp))
+                            }
                         }
 
                         // 1. SMS & Notification Permission
@@ -346,11 +346,6 @@ fun MainAppContent(
                                 Button(
                                     onClick = {
                                         onRecheckPermissions()
-                                        val perms = mutableListOf(Manifest.permission.RECEIVE_SMS, Manifest.permission.READ_SMS)
-                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                             perms.add(Manifest.permission.POST_NOTIFICATIONS)
-                                        }
-                                        permissionLauncher.launch(perms.toTypedArray())
                                     },
                                     colors = ButtonDefaults.buttonColors(containerColor = PrimaryIndigo),
                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)

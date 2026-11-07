@@ -14,6 +14,9 @@ class WhatsAppAccessibilityService : AccessibilityService() {
         private const val TAG = "WhatsAppAccessibility"
         private const val TARGET_WHATSAPP = "com.whatsapp"
         private const val TARGET_WHATSAPP_BUSINESS = "com.whatsapp.w4b"
+
+        @Volatile
+        var isConnected: Boolean = false
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -21,8 +24,14 @@ class WhatsAppAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        isConnected = true
         Log.i(TAG, "WhatsAppAccessibilityService connected & ready.")
         WhatsAppAutomationManager.refreshState(applicationContext)
+
+        // Ensure foreground service is kept alive
+        if (!SyncForegroundService.isServiceRunning) {
+            SyncForegroundService.start(applicationContext)
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -33,8 +42,22 @@ class WhatsAppAccessibilityService : AccessibilityService() {
             return
         }
 
+        // Check if automation is enabled in settings
+        val config = PreferencesManager.getInstance(applicationContext).loadConfig()
+        if (!config.whatsappAutomationEnabled) {
+            return
+        }
+
         // Only proceed if our app has an active pending automation request!
         if (!WhatsAppAutomationManager.isPending) {
+            return
+        }
+
+        // Safety timeout: if more than 15 seconds passed since the app triggered the intent, expire it!
+        val elapsed = System.currentTimeMillis() - WhatsAppAutomationManager.dispatchTimeMillis
+        if (elapsed > 15000L || elapsed < 0L) {
+            Log.w(TAG, "WhatsApp dispatch request expired ($elapsed ms). Ignoring.")
+            WhatsAppAutomationManager.cancelPending()
             return
         }
 
@@ -46,19 +69,20 @@ class WhatsAppAccessibilityService : AccessibilityService() {
         if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
             eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
         ) {
-            processActiveWindow()
+            processActiveWindow(config)
         }
     }
 
-    private fun processActiveWindow() {
+    private fun processActiveWindow(config: com.example.model.SyncConfig) {
         val rootNode = rootInActiveWindow ?: return
         val sendButton = findSendButton(rootNode)
 
         if (sendButton != null && sendButton.isEnabled) {
             isClickInProgress = true
-            val config = PreferencesManager.getInstance(applicationContext).loadConfig()
-            val delayMs = config.whatsappSendDelayMs.coerceIn(800L, 3000L)
+            // Immediately mark click as initiated so no other accessibility event can trigger another click!
+            WhatsAppAutomationManager.markClickInitiated()
 
+            val delayMs = config.whatsappSendDelayMs.coerceIn(800L, 3000L)
             Log.i(TAG, "Send button detected! Waiting safe delay of ${delayMs}ms before auto-click...")
 
             mainHandler.postDelayed({
@@ -142,6 +166,7 @@ class WhatsAppAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        isConnected = false
         isClickInProgress = false
         WhatsAppAutomationManager.refreshState(applicationContext)
     }

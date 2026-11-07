@@ -65,11 +65,32 @@ class PreferencesManager(context: Context) {
             chatbotWhatsAppEnabled = prefs.getBoolean("chatbot_wa_enabled", true),
             chatbotMessengerEnabled = prefs.getBoolean("chatbot_fb_enabled", true),
             geminiApiKey = prefs.getString("gemini_api_key", "") ?: "",
-            geminiModel = prefs.getString("gemini_model", "gemini-2.5-flash") ?: "gemini-2.5-flash",
+            geminiModel = prefs.getString("gemini_model", "gemini-3.8-flash") ?: "gemini-3.8-flash",
             liveChatHandoverActive = prefs.getBoolean("live_chat_handover", false),
             chatbotAutoVerifyPayment = prefs.getBoolean("chatbot_auto_verify_payment", true),
-            chatbotCustomPrompt = prefs.getString("chatbot_custom_prompt", com.example.model.DEFAULT_CHATBOT_PROMPT) ?: com.example.model.DEFAULT_CHATBOT_PROMPT
+            chatbotCustomPrompt = prefs.getString("chatbot_custom_prompt", com.example.model.DEFAULT_CHATBOT_PROMPT) ?: com.example.model.DEFAULT_CHATBOT_PROMPT,
+
+            customAutoReplyEnabled = prefs.getBoolean("custom_auto_reply_enabled", false),
+            customAutoReplyMessage = prefs.getString("custom_auto_reply_message", com.example.model.DEFAULT_CUSTOM_AUTO_REPLY_MESSAGE) ?: com.example.model.DEFAULT_CUSTOM_AUTO_REPLY_MESSAGE
         )
+    }
+
+    fun isRowProcessed(rowId: String): Boolean {
+        if (rowId.isBlank()) return false
+        val set = prefs.getStringSet("processed_row_ids", emptySet()) ?: emptySet()
+        return set.contains(rowId)
+    }
+
+    fun markRowProcessed(rowId: String) {
+        if (rowId.isBlank()) return
+        val set = prefs.getStringSet("processed_row_ids", emptySet())?.toMutableSet() ?: mutableSetOf()
+        set.add(rowId)
+        if (set.size > 500) {
+            val trimmed = set.toList().takeLast(300).toSet()
+            prefs.edit().putStringSet("processed_row_ids", trimmed).apply()
+        } else {
+            prefs.edit().putStringSet("processed_row_ids", set).apply()
+        }
     }
 
     fun saveConfig(config: SyncConfig) {
@@ -119,6 +140,9 @@ class PreferencesManager(context: Context) {
             putBoolean("live_chat_handover", config.liveChatHandoverActive)
             putBoolean("chatbot_auto_verify_payment", config.chatbotAutoVerifyPayment)
             putString("chatbot_custom_prompt", config.chatbotCustomPrompt)
+
+            putBoolean("custom_auto_reply_enabled", config.customAutoReplyEnabled)
+            putString("custom_auto_reply_message", config.customAutoReplyMessage)
             apply()
         }
         _config.value = config

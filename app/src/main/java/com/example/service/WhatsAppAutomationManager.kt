@@ -73,6 +73,17 @@ object WhatsAppAutomationManager {
     var dispatchTimeMillis: Long = 0L
         private set
 
+    fun cancelPending() {
+        isPending = false
+        pendingRowId = null
+        pendingPhone = null
+        _automationState.value = _automationState.value.copy(isAutomationPending = false)
+    }
+
+    fun markClickInitiated() {
+        isPending = false
+    }
+
     private val _automationState = MutableStateFlow(WhatsAppAutomationState())
     val automationState: StateFlow<WhatsAppAutomationState> = _automationState.asStateFlow()
 
@@ -118,6 +129,8 @@ object WhatsAppAutomationManager {
      * Checks whether the Auto WhatsApp Sender AccessibilityService is active.
      */
     fun isAccessibilityServiceEnabled(context: Context): Boolean {
+        if (WhatsAppAccessibilityService.isConnected) return true
+
         val expectedComponentName = ComponentName(context, WhatsAppAccessibilityService::class.java)
         val enabledServicesSetting = Settings.Secure.getString(
             context.contentResolver,
@@ -129,8 +142,11 @@ object WhatsAppAutomationManager {
 
         while (colonSplitter.hasNext()) {
             val componentNameString = colonSplitter.next()
+            if (componentNameString.contains("WhatsAppAccessibilityService", ignoreCase = true)) {
+                return true
+            }
             val enabledComponent = ComponentName.unflattenFromString(componentNameString)
-            if (enabledComponent != null && enabledComponent == expectedComponentName) {
+            if (enabledComponent != null && (enabledComponent == expectedComponentName || enabledComponent.className.endsWith("WhatsAppAccessibilityService"))) {
                 return true
             }
         }
@@ -219,6 +235,9 @@ object WhatsAppAutomationManager {
             )
 
             context.startActivity(intent)
+            if (!rowId.isNullOrBlank()) {
+                PreferencesManager.getInstance(context).markRowProcessed(rowId)
+            }
             Log.i(TAG, "WhatsApp intent launched for phone: $sanitizedPhone, rowId: $rowId")
 
             // Timeout safety: expire after 20 seconds if send button wasn't clicked

@@ -54,6 +54,10 @@ class SocialNotificationListenerService : NotificationListenerService() {
         private val _recentBotActivities = MutableStateFlow<List<ChatbotActivityItem>>(emptyList())
         val recentBotActivities: StateFlow<List<ChatbotActivityItem>> = _recentBotActivities.asStateFlow()
 
+        fun clearBotActivities() {
+            _recentBotActivities.value = emptyList()
+        }
+
         /**
          * Pause bot auto-reply for a specific sender for the given duration in minutes.
          * When merchant is live-chatting, this prevents bot interference.

@@ -251,15 +251,31 @@ object SupabaseRealtimeManager {
         }
     }
 
+    private fun JSONObject.getCleanString(key: String): String? {
+        if (!has(key) || isNull(key)) return null
+        val v = optString(key).trim()
+        if (v.isEmpty() || v.equals("null", ignoreCase = true) || v.equals("undefined", ignoreCase = true)) {
+            return null
+        }
+        return v
+    }
+
     /**
-     * Resilient Fallback Polling: Polls every 6 seconds for any rows where whatsapp_sent = false
-     * and whatsapp_number is filled by the website checkout.
+     * Resilient Fallback Polling:
+     * Only runs when WebSocket is NOT listening, querying only confirmed orders
+     * where customer_name and whatsapp_number are non-null and whatsapp_sent is false.
      */
     private fun startPollingFallback(context: Context) {
         pollingJob?.cancel()
         pollingJob = managerScope?.launch {
             while (isActive && isRunning) {
-                delay(6000L)
+                // If WebSocket is actively listening to real-time events, do not poll aggressively!
+                if (_status.value == RealtimeStatus.LISTENING) {
+                    delay(30000L)
+                    continue
+                }
+
+                delay(20000L)
                 try {
                     val config = PreferencesManager.getInstance(context).loadConfig()
                     if (!config.whatsappAutomationEnabled || config.supabaseUrl.isBlank() || config.supabaseApiKey.isBlank()) {
@@ -274,30 +290,17 @@ object SupabaseRealtimeManager {
                     val table = config.supabasePaymentsTable.trim().ifEmpty { "payments" }
                     val sentCol = config.whatsappSentColumn.trim().ifEmpty { "whatsapp_sent" }
 
-                    // Primary query: look for rows with whatsapp_number not null and whatsapp_sent is false
-                    var queryUrl = "$baseUrl/rest/v1/$table?whatsapp_number=not.is.null&$sentCol=is.false&order=id.desc&limit=5"
+                    // Only query confirmed rows where customer has submitted their WhatsApp number and name
+                    val queryUrl = "$baseUrl/rest/v1/$table?whatsapp_number=not.is.null&customer_name=not.is.null&$sentCol=is.false&order=id.desc&limit=5"
 
-                    var request = Request.Builder()
+                    val request = Request.Builder()
                         .url(queryUrl)
                         .addHeader("apikey", config.supabaseApiKey.trim())
                         .addHeader("Authorization", "Bearer ${config.supabaseApiKey.trim()}")
                         .addHeader("Content-Type", "application/json")
                         .build()
 
-                    var response = httpClient.newCall(request).execute()
-                    
-                    // If sentCol (e.g. whatsapp_sent) column does not exist yet on Supabase, fallback query
-                    if (!response.isSuccessful && response.code == 400) {
-                        queryUrl = "$baseUrl/rest/v1/$table?whatsapp_number=not.is.null&order=id.desc&limit=5"
-                        request = Request.Builder()
-                            .url(queryUrl)
-                            .addHeader("apikey", config.supabaseApiKey.trim())
-                            .addHeader("Authorization", "Bearer ${config.supabaseApiKey.trim()}")
-                            .addHeader("Content-Type", "application/json")
-                            .build()
-                        response = httpClient.newCall(request).execute()
-                    }
-
+                    val response = httpClient.newCall(request).execute()
                     if (response.isSuccessful) {
                         val body = response.body?.string() ?: ""
                         if (body.startsWith("[")) {
@@ -309,8 +312,7 @@ object SupabaseRealtimeManager {
                         }
                     }
                 } catch (e: Exception) {
-                    // Ignored in loop, log debug
-                    Log.d(TAG, "Polling check completed: ${e.message}")
+                    Log.d(TAG, "Fallback polling check: ${e.message}")
                 }
             }
         }
@@ -318,98 +320,102 @@ object SupabaseRealtimeManager {
 
     /**
      * Evaluates a payment row from either WebSocket or Polling.
+     * Strictly verifies that the customer has confirmed their order on the website
+     * before any WhatsApp dispatch can take place.
      */
     private fun processPaymentRecord(context: Context, record: JSONObject) {
-        val config = PreferencesManager.getInstance(context).loadConfig()
+        val prefs = PreferencesManager.getInstance(context)
+        val config = prefs.loadConfig()
         if (!config.whatsappAutomationEnabled) {
             Log.d(TAG, "WhatsApp automation is disabled in settings. Skipping.")
             return
         }
 
-        val rowId = record.optString("id").ifBlank { record.optString("trx_id") }
-        if (rowId.isBlank()) {
-            Log.w(TAG, "Payment record has no 'id' or 'trx_id'. Skipping.")
+        val rowId = record.getCleanString("id") ?: record.getCleanString("trx_id")
+        if (rowId.isNullOrBlank()) {
+            Log.w(TAG, "Payment record has no valid id or trx_id. Skipping.")
             return
         }
 
-        // Check if already processed to avoid duplicate messaging
-        if (processedRowIds.contains(rowId)) {
+        // 1. Persistent deduplication check: has this row already been processed?
+        if (processedRowIds.contains(rowId) || prefs.isRowProcessed(rowId)) {
             return
         }
 
+        // 2. Check if already marked as sent in Supabase database
         val sentCol = config.whatsappSentColumn.trim().ifEmpty { "whatsapp_sent" }
         val isAlreadySent = record.optBoolean(sentCol, false)
         if (isAlreadySent) {
             processedRowIds.add(rowId)
+            prefs.markRowProcessed(rowId)
             return
         }
 
+        // 3. Strict Check: WhatsApp Number MUST be explicitly provided by the customer
+        // We NEVER fall back to sender_phone (which is just the sender wallet from SMS before checkout)
         val numCol = config.whatsappNumberColumn.trim().ifEmpty { "whatsapp_number" }
-        var rawPhone = record.optString(numCol)
-        if (rawPhone.isBlank()) {
-            // Fallback to sender_phone or phone if whatsapp_number is not set
-            rawPhone = record.optString("sender_phone").ifBlank { record.optString("phone") }
-        }
-
-        if (rawPhone.isBlank()) {
-            Log.w(TAG, "Row $rowId has empty phone number. Skipping.")
+        val customerPhone = record.getCleanString(numCol)
+        if (customerPhone.isNullOrBlank()) {
+            Log.d(TAG, "Row $rowId: Customer has not provided a WhatsApp number yet. Skipping.")
             return
         }
 
-        val sanitized = PhoneNumberSanitizer.sanitize(rawPhone)
+        val sanitized = PhoneNumberSanitizer.sanitize(customerPhone)
         if (sanitized == null) {
-            Log.w(TAG, "Row $rowId phone '$rawPhone' cannot be sanitized to valid BD format. Skipping.")
+            Log.w(TAG, "Row $rowId: Phone '$customerPhone' cannot be sanitized to valid BD format. Skipping.")
             return
         }
 
-        // Mark rowId as processed in memory so neither WebSocket nor Polling duplicates it
+        // 4. Strict Check: Customer Order MUST be confirmed by the customer on the website
+        // An unconfirmed order will not have customer_name or product_name
+        val customerName = record.getCleanString("customer_name")
+            ?: record.getCleanString("name")
+            ?: record.getCleanString("client_name")
+            ?: record.getCleanString("customer")
+
+        val prodName = record.getCleanString("product_name")
+            ?: record.getCleanString("product")
+            ?: record.getCleanString("item_name")
+            ?: record.getCleanString("course_name")
+            ?: record.getCleanString("title")
+
+        // CRITICAL: If customer_name or product_name is null/empty/literal "null", the order is NOT confirmed!
+        if (customerName == null || prodName == null) {
+            Log.i(TAG, "Row $rowId: Order not confirmed yet on website (customerName=$customerName, prodName=$prodName). Waiting for customer confirmation signal.")
+            return
+        }
+
+        // Mark rowId as processed in memory and disk so it will never be queued again
         processedRowIds.add(rowId)
+        prefs.markRowProcessed(rowId)
         if (processedRowIds.size > 2000) {
             processedRowIds.clear()
         }
 
-        val method = record.optString("method", "bKash")
-        val trxId = record.optString("trx_id", rowId)
+        val prodLink = record.getCleanString("product_link")
+            ?: record.getCleanString("vip_link")
+            ?: record.getCleanString("link")
+            ?: record.getCleanString("download_link")
+            ?: record.getCleanString("drive_link")
+            ?: record.getCleanString("invoice_url")
+
+        val method = record.getCleanString("method") ?: "bKash"
+        val trxId = record.getCleanString("trx_id") ?: rowId
         val amount = if (record.has("price")) record.optDouble("price", 0.0)
             else if (record.has("product_price")) record.optDouble("product_price", 0.0)
             else record.optDouble("amount", 0.0)
 
-        val customerName = record.optString("customer_name")
-            .ifBlank { record.optString("name") }
-            .ifBlank { record.optString("client_name") }
-            .ifBlank { record.optString("customer") }
-            .ifBlank { "সম্মানিত গ্রাহক" }
+        // Optional website-generated custom message
+        val customMsg = record.getCleanString("custom_message")
+            ?: record.getCleanString("message")
+            ?: record.getCleanString("text")
+            ?: record.getCleanString("whatsapp_message")
 
-        // Optional website-generated custom message, product details, or download links
-        val customMsg = record.optString("custom_message")
-            .ifBlank { record.optString("message") }
-            .ifBlank { record.optString("text") }
-            .ifBlank { record.optString("whatsapp_message") }
-            .ifBlank { null }
-
-        val prodName = record.optString("product_name")
-            .ifBlank { record.optString("product") }
-            .ifBlank { record.optString("item_name") }
-            .ifBlank { record.optString("course_name") }
-            .ifBlank { record.optString("title") }
-            .ifBlank { null }
-
-        val prodLink = record.optString("product_link")
-            .ifBlank { record.optString("vip_link") }
-            .ifBlank { record.optString("link") }
-            .ifBlank { record.optString("download_link") }
-            .ifBlank { record.optString("drive_link") }
-            .ifBlank { record.optString("invoice_url") }
-            .ifBlank { null }
-
-        val orderId = record.optString("order_id")
-            .ifBlank { record.optString("order_number") }
-            .ifBlank { null }
-
-        val brand = record.optString("brand_name")
-            .ifBlank { record.optString("company_name") }
-            .ifBlank { record.optString("website_name") }
-            .ifBlank { "Technography" }
+        val orderId = record.getCleanString("order_id") ?: record.getCleanString("order_number")
+        val brand = record.getCleanString("brand_name")
+            ?: record.getCleanString("company_name")
+            ?: record.getCleanString("website_name")
+            ?: "Technography"
 
         val queueItem = PaymentQueueItem(
             rowId = rowId,
@@ -427,8 +433,8 @@ object SupabaseRealtimeManager {
 
         pendingQueue.add(queueItem)
         _pendingCount.value = pendingQueue.size
-        _lastEventLog.value = "New payment queued for +$sanitized (৳$amount)"
-        Log.i(TAG, "Queued WhatsApp dispatch for rowId: $rowId, phone: $sanitized")
+        _lastEventLog.value = "New confirmed order for $customerName (+${sanitized})"
+        Log.i(TAG, "Queued WhatsApp dispatch for confirmed order rowId: $rowId, customer: $customerName, phone: $sanitized")
     }
 
     /**
