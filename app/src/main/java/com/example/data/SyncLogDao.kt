@@ -18,6 +18,12 @@ interface SyncLogDao {
     @Query("SELECT * FROM sync_logs WHERE id = :id")
     suspend fun getLogById(id: Long): SyncLogEntity?
 
+    @Query("SELECT * FROM sync_logs WHERE UPPER(trxId) = UPPER(:trxId) LIMIT 1")
+    suspend fun getLogByTrxId(trxId: String): SyncLogEntity?
+
+    @Query("SELECT * FROM sync_logs ORDER BY timestamp DESC LIMIT 50")
+    suspend fun getRecentLogsList(): List<SyncLogEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertLog(log: SyncLogEntity): Long
 

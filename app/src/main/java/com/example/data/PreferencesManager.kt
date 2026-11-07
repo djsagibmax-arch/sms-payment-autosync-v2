@@ -16,24 +16,24 @@ class PreferencesManager(context: Context) {
     val config: StateFlow<SyncConfig> = _config.asStateFlow()
 
     fun loadConfig(): SyncConfig {
-        val modeStr = prefs.getString("connection_mode", ConnectionMode.CUSTOM_API.name) ?: ConnectionMode.CUSTOM_API.name
+        val modeStr = prefs.getString("connection_mode", ConnectionMode.SUPABASE.name) ?: ConnectionMode.SUPABASE.name
         val mode = try {
             ConnectionMode.valueOf(modeStr)
         } catch (e: Exception) {
-            ConnectionMode.CUSTOM_API
+            ConnectionMode.SUPABASE
         }
 
         return SyncConfig(
             connectionMode = mode,
             forwardToCustomApi = prefs.getBoolean("forward_to_custom_api", true),
-            forwardToSupabase = prefs.getBoolean("forward_to_supabase", false),
+            forwardToSupabase = prefs.getBoolean("forward_to_supabase", true),
             forwardToWebhook = prefs.getBoolean("forward_to_webhook", false),
             
-            supabaseUrl = prefs.getString("supabase_url", "") ?: "",
-            supabaseApiKey = prefs.getString("supabase_api_key", "") ?: "",
-            supabaseTable = prefs.getString("supabase_table", "sms_payments") ?: "sms_payments",
+            supabaseUrl = prefs.getString("supabase_url", "https://safymsagxrjymhfdzkph.supabase.co") ?: "https://safymsagxrjymhfdzkph.supabase.co",
+            supabaseApiKey = prefs.getString("supabase_api_key", "sb_publishable_qthdZZg-tjDRc_loLbVUYg_b77rK-Bv") ?: "sb_publishable_qthdZZg-tjDRc_loLbVUYg_b77rK-Bv",
+            supabaseTable = prefs.getString("supabase_table", "payments") ?: "payments",
             
-            customEndpointUrl = prefs.getString("custom_endpoint_url", "https://webhook.site/placeholder") ?: "https://webhook.site/placeholder",
+            customEndpointUrl = prefs.getString("custom_endpoint_url", "https://my-sales-bot-5d70.onrender.com/webhook/sms") ?: "https://my-sales-bot-5d70.onrender.com/webhook/sms",
             customAuthHeaderName = prefs.getString("custom_auth_header_name", "Authorization") ?: "Authorization",
             customAuthToken = prefs.getString("custom_auth_token", "") ?: "",
             customHttpMethod = prefs.getString("custom_http_method", "POST") ?: "POST",
@@ -51,7 +51,24 @@ class PreferencesManager(context: Context) {
             
             autoStartService = prefs.getBoolean("auto_start_service", true),
             notifyOnSuccess = prefs.getBoolean("notify_on_success", true),
-            notifyOnFailure = prefs.getBoolean("notify_on_failure", true)
+            notifyOnFailure = prefs.getBoolean("notify_on_failure", true),
+
+            whatsappAutomationEnabled = prefs.getBoolean("whatsapp_automation_enabled", true),
+            supabasePaymentsTable = prefs.getString("supabase_payments_table", "payments") ?: "payments",
+            whatsappNumberColumn = prefs.getString("whatsapp_number_column", "whatsapp_number") ?: "whatsapp_number",
+            whatsappSentColumn = prefs.getString("whatsapp_sent_column", "whatsapp_sent") ?: "whatsapp_sent",
+            whatsappMessageTemplate = prefs.getString("whatsapp_msg_template", com.example.model.DEFAULT_VIP_WHATSAPP_TEMPLATE) ?: com.example.model.DEFAULT_VIP_WHATSAPP_TEMPLATE,
+            whatsappSendDelayMs = prefs.getLong("whatsapp_send_delay_ms", 1200L),
+            whatsappAutoBack = prefs.getBoolean("whatsapp_auto_back", true),
+
+            chatbotEnabled = prefs.getBoolean("chatbot_enabled", true),
+            chatbotWhatsAppEnabled = prefs.getBoolean("chatbot_wa_enabled", true),
+            chatbotMessengerEnabled = prefs.getBoolean("chatbot_fb_enabled", true),
+            geminiApiKey = prefs.getString("gemini_api_key", "") ?: "",
+            geminiModel = prefs.getString("gemini_model", "gemini-2.5-flash") ?: "gemini-2.5-flash",
+            liveChatHandoverActive = prefs.getBoolean("live_chat_handover", false),
+            chatbotAutoVerifyPayment = prefs.getBoolean("chatbot_auto_verify_payment", true),
+            chatbotCustomPrompt = prefs.getString("chatbot_custom_prompt", com.example.model.DEFAULT_CHATBOT_PROMPT) ?: com.example.model.DEFAULT_CHATBOT_PROMPT
         )
     }
 
@@ -85,6 +102,23 @@ class PreferencesManager(context: Context) {
             putBoolean("auto_start_service", config.autoStartService)
             putBoolean("notify_on_success", config.notifyOnSuccess)
             putBoolean("notify_on_failure", config.notifyOnFailure)
+
+            putBoolean("whatsapp_automation_enabled", config.whatsappAutomationEnabled)
+            putString("supabase_payments_table", config.supabasePaymentsTable.trim())
+            putString("whatsapp_number_column", config.whatsappNumberColumn.trim())
+            putString("whatsapp_sent_column", config.whatsappSentColumn.trim())
+            putString("whatsapp_msg_template", config.whatsappMessageTemplate)
+            putLong("whatsapp_send_delay_ms", config.whatsappSendDelayMs)
+            putBoolean("whatsapp_auto_back", config.whatsappAutoBack)
+
+            putBoolean("chatbot_enabled", config.chatbotEnabled)
+            putBoolean("chatbot_wa_enabled", config.chatbotWhatsAppEnabled)
+            putBoolean("chatbot_fb_enabled", config.chatbotMessengerEnabled)
+            putString("gemini_api_key", config.geminiApiKey.trim())
+            putString("gemini_model", config.geminiModel)
+            putBoolean("live_chat_handover", config.liveChatHandoverActive)
+            putBoolean("chatbot_auto_verify_payment", config.chatbotAutoVerifyPayment)
+            putString("chatbot_custom_prompt", config.chatbotCustomPrompt)
             apply()
         }
         _config.value = config

@@ -45,6 +45,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val recentLogs: StateFlow<List<SyncLogEntity>> = dao.getRecentLogs()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val products: StateFlow<List<com.example.data.ProductEntity>> = db.productDao().getAllProducts()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val botActivities = com.example.service.SocialNotificationListenerService.recentBotActivities
+
+    private val _isNotificationAccessGranted = MutableStateFlow(false)
+    val isNotificationAccessGranted: StateFlow<Boolean> = _isNotificationAccessGranted.asStateFlow()
+
     val stats: StateFlow<DashboardStats> = combine(
         dao.getTotalCount(),
         dao.getSuccessCount(),
@@ -81,6 +89,103 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isSimulating = MutableStateFlow(false)
     val isSimulating: StateFlow<Boolean> = _isSimulating.asStateFlow()
+
+    // WhatsApp UI Automation & Supabase Realtime State
+    val whatsappAutomationState = com.example.service.WhatsAppAutomationManager.automationState
+    val supabaseRealtimeStatus = com.example.network.SupabaseRealtimeManager.status
+    val supabaseRealtimeLog = com.example.network.SupabaseRealtimeManager.lastEventLog
+    val pendingQueueCount = com.example.network.SupabaseRealtimeManager.pendingCount
+
+    fun refreshWhatsAppState(context: Context) {
+        com.example.service.WhatsAppAutomationManager.refreshState(context)
+    }
+
+    fun openAccessibilitySettings(context: Context) {
+        com.example.service.WhatsAppAutomationManager.openAccessibilitySettings(context)
+    }
+
+    fun restartRealtimeListener(context: Context) {
+        com.example.network.SupabaseRealtimeManager.restart(context)
+        _userMessage.value = "Restarting Supabase Realtime listener..."
+    }
+
+    fun triggerTestWhatsAppSend(
+        context: Context,
+        phone: String,
+        message: String,
+        method: String = "bKash",
+        trxId: String = "TEST123456",
+        amount: Double = 500.0
+    ) {
+        val success = com.example.service.WhatsAppAutomationManager.triggerSend(
+            context = context,
+            rawPhone = phone,
+            message = message,
+            rowId = "TEST_ROW_" + System.currentTimeMillis().toString().takeLast(4),
+            method = method,
+            trxId = trxId,
+            amount = amount
+        )
+        if (success) {
+            _userMessage.value = "Launching WhatsApp intent for test..."
+        } else {
+            _userMessage.value = "Test failed. Check phone number & WhatsApp installation."
+        }
+    }
+
+    fun refreshNotificationAccessState(context: Context) {
+        _isNotificationAccessGranted.value = com.example.service.SocialNotificationListenerService.isNotificationAccessGranted(context)
+    }
+
+    fun openNotificationAccessSettings(context: Context) {
+        com.example.service.SocialNotificationListenerService.openNotificationAccessSettings(context)
+    }
+
+    fun saveProduct(product: com.example.data.ProductEntity) {
+        viewModelScope.launch {
+            db.productDao().insertProduct(product)
+            _userMessage.value = "Product saved: ${product.name}"
+        }
+    }
+
+    fun deleteProduct(productId: String) {
+        viewModelScope.launch {
+            db.productDao().deleteProductById(productId)
+            _userMessage.value = "Product removed"
+        }
+    }
+
+    fun toggleProductActive(product: com.example.data.ProductEntity) {
+        viewModelScope.launch {
+            val updated = product.copy(isActive = !product.isActive)
+            db.productDao().updateProduct(updated)
+            _userMessage.value = if (updated.isActive) "Product activated" else "Product deactivated"
+        }
+    }
+
+    fun pauseBotForSender(senderKey: String, minutes: Int = 15) {
+        com.example.service.SocialNotificationListenerService.pauseAutoReplyForSender(senderKey, minutes)
+        _userMessage.value = "Bot paused for $senderKey for $minutes mins"
+    }
+
+    fun resumeBotForSender(senderKey: String) {
+        com.example.service.SocialNotificationListenerService.resumeAutoReplyForSender(senderKey)
+        _userMessage.value = "Bot resumed for $senderKey"
+    }
+
+    fun testChatbotReply(context: Context, query: String, onResult: (String) -> Unit) {
+        viewModelScope.launch {
+            val currentCfg = config.value
+            val response = com.example.service.GeminiSalesAssistant.generateReply(
+                context = context,
+                senderName = "Test Customer",
+                customerMessage = query,
+                platformName = "Test Simulator",
+                config = currentCfg
+            )
+            onResult(response)
+        }
+    }
 
     fun updateConfig(newConfig: SyncConfig) {
         prefsManager.saveConfig(newConfig)

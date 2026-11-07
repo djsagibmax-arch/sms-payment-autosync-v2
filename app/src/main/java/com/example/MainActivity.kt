@@ -37,16 +37,20 @@ import com.example.service.SyncForegroundService
 import com.example.ui.*
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.PrimaryIndigo
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import com.example.ui.theme.StatusFailed
 import com.example.ui.theme.StatusSuccess
 import com.example.util.KeepAliveHelper
 
 enum class AppNavTab(val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
-    DASHBOARD("Dashboard", Icons.Default.Dashboard),
-    WALLETS("Wallets", Icons.Default.Tune),
-    CONNECTION("Connection", Icons.Default.CloudSync),
-    LOGS("Live Logs", Icons.Default.ReceiptLong),
-    SIMULATOR("Simulator", Icons.Default.BugReport)
+    DASHBOARD("ড্যাশবোর্ড", Icons.Default.Dashboard),
+    CHATBOT("AI চ্যাটবট", Icons.Default.SmartToy),
+    PRODUCTS("প্রোডাক্ট", Icons.Default.Inventory2),
+    WHATSAPP("অটো-সেন্ড", Icons.Default.Chat),
+    CONNECTION("কানেকশন", Icons.Default.CloudSync),
+    WALLETS("ওয়ালেট", Icons.Default.Tune),
+    LOGS("লগস", Icons.Default.ReceiptLong),
+    SIMULATOR("সিমুলেটর", Icons.Default.BugReport)
 }
 
 class MainActivity : ComponentActivity() {
@@ -114,6 +118,8 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         viewModel.refreshServiceState()
+        viewModel.refreshWhatsAppState(this)
+        viewModel.refreshNotificationAccessState(this)
     }
 }
 
@@ -242,22 +248,50 @@ fun MainAppContent(
             )
         },
         bottomBar = {
-            NavigationBar(
-                containerColor = MaterialTheme.colorScheme.surface,
-                tonalElevation = 8.dp
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 8.dp,
+                shadowElevation = 8.dp
             ) {
-                AppNavTab.values().forEach { tab ->
-                    NavigationBarItem(
-                        selected = currentTab == tab,
-                        onClick = { currentTab = tab },
-                        icon = {
-                            Icon(imageVector = tab.icon, contentDescription = tab.title)
-                        },
-                        label = {
-                            Text(text = tab.title, fontSize = 10.sp, fontWeight = if (currentTab == tab) FontWeight.Bold else FontWeight.Normal)
-                        },
-                        modifier = Modifier.testTag("nav_tab_${tab.name.lowercase()}")
-                    )
+                ScrollableTabRow(
+                    selectedTabIndex = currentTab.ordinal,
+                    edgePadding = 8.dp,
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    contentColor = PrimaryIndigo,
+                    indicator = { tabPositions ->
+                        if (currentTab.ordinal < tabPositions.size) {
+                            TabRowDefaults.SecondaryIndicator(
+                                modifier = Modifier.tabIndicatorOffset(tabPositions[currentTab.ordinal]),
+                                color = PrimaryIndigo
+                            )
+                        }
+                    },
+                    divider = { HorizontalDivider() }
+                ) {
+                    AppNavTab.values().forEach { tab ->
+                        val isSelected = currentTab == tab
+                        Tab(
+                            selected = isSelected,
+                            onClick = { currentTab = tab },
+                            text = {
+                                Text(
+                                    text = tab.title,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSelected) PrimaryIndigo else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            },
+                            icon = {
+                                Icon(
+                                    imageVector = tab.icon,
+                                    contentDescription = tab.title,
+                                    tint = if (isSelected) PrimaryIndigo else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            },
+                            modifier = Modifier.testTag("nav_tab_${tab.name.lowercase()}")
+                        )
+                    }
                 }
             }
         }
@@ -267,44 +301,120 @@ fun MainAppContent(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            // Permission Alert Banner if not granted
-            if (!hasSmsPermissions) {
+            val waState by viewModel.whatsappAutomationState.collectAsStateWithLifecycle()
+            val isNotifAccessGranted by viewModel.isNotificationAccessGranted.collectAsStateWithLifecycle()
+            var isBatteryIgnored by remember {
+                mutableStateOf(KeepAliveHelper.isBatteryOptimizationIgnored(context))
+            }
+
+            LaunchedEffect(Unit) {
+                viewModel.refreshWhatsAppState(context)
+                viewModel.refreshNotificationAccessState(context)
+                isBatteryIgnored = KeepAliveHelper.isBatteryOptimizationIgnored(context)
+            }
+
+            val needsAnyPermission = !hasSmsPermissions || !isBatteryIgnored || !waState.isAccessibilityEnabled || !isNotifAccessGranted
+            if (needsAnyPermission) {
                 Surface(
-                    color = StatusFailed.copy(alpha = 0.12f),
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.Warning, contentDescription = null, tint = StatusFailed, modifier = Modifier.size(20.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Default.Warning, contentDescription = null, tint = StatusFailed, modifier = Modifier.size(18.dp))
                             Text(
-                                text = "SMS & Notification permissions required for 24/7 AutoSync.",
-                                fontSize = 12.sp,
+                                text = "প্রয়োজনীয় পারমিশন সেটআপ (Required Setup)",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
                                 color = StatusFailed
                             )
                         }
-                        Button(
-                            onClick = {
-                                onRecheckPermissions()
-                                val perms = mutableListOf(Manifest.permission.RECEIVE_SMS, Manifest.permission.READ_SMS)
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                    perms.add(Manifest.permission.POST_NOTIFICATIONS)
+
+                        // 1. SMS & Notification Permission
+                        if (!hasSmsPermissions) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("১. SMS ও নোটিফিকেশন পারমিশন", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+                                Button(
+                                    onClick = {
+                                        onRecheckPermissions()
+                                        val perms = mutableListOf(Manifest.permission.RECEIVE_SMS, Manifest.permission.READ_SMS)
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                             perms.add(Manifest.permission.POST_NOTIFICATIONS)
+                                        }
+                                        permissionLauncher.launch(perms.toTypedArray())
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryIndigo),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                ) {
+                                    Text("অনুমতি দিন", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
-                                permissionLauncher.launch(perms.toTypedArray())
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryIndigo),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                        ) {
-                            Text("Allow All", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+
+                        // 2. Battery Saver Optimization Exemption
+                        if (!isBatteryIgnored) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("২. ২৪/৭ ব্যাকগ্রাউন্ড সার্ভিস (ব্যাটারি সেভার)", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+                                Button(
+                                    onClick = {
+                                        KeepAliveHelper.requestIgnoreBatteryOptimization(context)
+                                        isBatteryIgnored = KeepAliveHelper.isBatteryOptimizationIgnored(context)
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706)),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                ) {
+                                    Text("সেভার বন্ধ করুন", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+
+                        // 3. Accessibility Service for WhatsApp Auto Send
+                        if (!waState.isAccessibilityEnabled) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("৩. হোয়াটসঅ্যাপ অটো-সেন্ডার (Accessibility)", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+                                Button(
+                                    onClick = { viewModel.openAccessibilitySettings(context) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF25D366)),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                ) {
+                                    Text("চালু করুন", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                }
+                            }
+                        }
+
+                        // 4. Notification Access for Social AI Chatbot
+                        if (!isNotifAccessGranted) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("৪. সোশ্যাল চ্যাটবট নোটিফিকেশন এক্সেস", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+                                Button(
+                                    onClick = { viewModel.openNotificationAccessSettings(context) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryIndigo),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                                ) {
+                                    Text("অনুমতি দিন", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
                         }
                     }
                 }
@@ -321,7 +431,20 @@ fun MainAppContent(
                     onNavigateToWallets = { currentTab = AppNavTab.WALLETS },
                     onNavigateToConnection = { currentTab = AppNavTab.CONNECTION },
                     onNavigateToLogs = { currentTab = AppNavTab.LOGS },
-                    onNavigateToSimulator = { currentTab = AppNavTab.SIMULATOR }
+                    onNavigateToSimulator = { currentTab = AppNavTab.SIMULATOR },
+                    onNavigateToWhatsApp = { currentTab = AppNavTab.WHATSAPP },
+                    onNavigateToChatbot = { currentTab = AppNavTab.CHATBOT },
+                    onNavigateToProducts = { currentTab = AppNavTab.PRODUCTS }
+                )
+                AppNavTab.CHATBOT -> ChatbotScreen(
+                    viewModel = viewModel
+                )
+                AppNavTab.PRODUCTS -> ProductsScreen(
+                    viewModel = viewModel
+                )
+                AppNavTab.WHATSAPP -> WhatsAppScreen(
+                    viewModel = viewModel,
+                    config = config
                 )
                 AppNavTab.WALLETS -> WalletsScreen(
                     viewModel = viewModel,

@@ -1,0 +1,726 @@
+package com.example.ui
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.example.model.DEFAULT_CHATBOT_PROMPT
+import com.example.model.SyncConfig
+import com.example.service.ChatbotActivityItem
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ChatbotScreen(
+    viewModel: MainViewModel,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val config by viewModel.config.collectAsState()
+    val isNotificationAccessGranted by viewModel.isNotificationAccessGranted.collectAsState()
+    val botActivities by viewModel.botActivities.collectAsState()
+
+    // Form state initialized from config
+    var isEnabled by remember(config) { mutableStateOf(config.chatbotEnabled) }
+    var isWhatsAppEnabled by remember(config) { mutableStateOf(config.chatbotWhatsAppEnabled) }
+    var isMessengerEnabled by remember(config) { mutableStateOf(config.chatbotMessengerEnabled) }
+    var apiKey by remember(config) { mutableStateOf(config.geminiApiKey) }
+    var selectedModel by remember(config) { mutableStateOf(config.geminiModel) }
+    var prompt by remember(config) { mutableStateOf(config.chatbotCustomPrompt) }
+    var autoVerify by remember(config) { mutableStateOf(config.chatbotAutoVerifyPayment) }
+    var liveChatHandover by remember(config) { mutableStateOf(config.liveChatHandoverActive) }
+
+    var showApiKey by remember { mutableStateOf(false) }
+    var showPromptEditor by remember { mutableStateOf(false) }
+
+    // Test Chat Simulator State
+    var simulatorInput by remember { mutableStateOf("") }
+    var simulatorChatHistory by remember {
+        mutableStateOf(
+            listOf(
+                "বট" to "আসসালামু আলাইকুম! Technography BD-তে স্বাগতম। আপনি কোন প্রোডাক্টটি দেখতে চান বলুন? যেমন: মেগা বান্ডেল, ফেসবুক রিলস ইত্যাদি।"
+            )
+        )
+    }
+    var isTestingChat by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        viewModel.refreshNotificationAccessState(context)
+    }
+
+    LazyColumn(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(vertical = 16.dp)
+    ) {
+        // Notification Access Warning / Status Banner
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("notification_permission_banner"),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isNotificationAccessGranted) {
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                    } else {
+                        MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f)
+                    }
+                )
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = if (isNotificationAccessGranted) Icons.Default.CheckCircle else Icons.Default.NotificationsActive,
+                        contentDescription = null,
+                        tint = if (isNotificationAccessGranted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(36.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (isNotificationAccessGranted) "নোটিফিকেশন অটো-রিপ্লাই সক্রিয়" else "নোটিফিকেশন অ্যাক্সেস অনুমতি দিন",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isNotificationAccessGranted) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = if (isNotificationAccessGranted) {
+                                "অ্যাপটি হোয়াটসঅ্যাপ ও মেসেঞ্জারের নোটিফিকেশন থেকে মেসেজ পড়ে স্বয়ংক্রিয়ভাবে উত্তর দিতে প্রস্তুত।"
+                            } else {
+                                "হোয়াটসঅ্যাপ বা মেসেঞ্জার ওপেন না করে সরাসরি নোটিফিকেশন বার থেকে উত্তর পাঠাতে এই অনুমতিটি প্রয়োজন।"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (isNotificationAccessGranted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
+                    if (!isNotificationAccessGranted) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = { viewModel.openNotificationAccessSettings(context) },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text("অনুমতি দিন", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Master Chatbot Toggle Card
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.SmartToy,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onPrimary,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "AI সেলস চ্যাটবট",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = if (isEnabled) "অটোমেটিক রিপ্লাই চালু আছে" else "চ্যাটবট বন্ধ আছে",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (isEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = isEnabled,
+                            onCheckedChange = {
+                                isEnabled = it
+                                viewModel.updateConfig(config.copy(chatbotEnabled = it))
+                            },
+                            modifier = Modifier.testTag("switch_chatbot_master")
+                        )
+                    }
+
+                    Divider(modifier = Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outlineVariant)
+
+                    // Platform Toggles
+                    Text(
+                        text = "প্ল্যাটফর্ম নির্বাচন করুন:",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Chat, contentDescription = null, tint = Color(0xFF25D366))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("WhatsApp & WA Business", style = MaterialTheme.typography.bodyMedium)
+                        }
+                        Switch(
+                            checked = isWhatsAppEnabled,
+                            onCheckedChange = {
+                                isWhatsAppEnabled = it
+                                viewModel.updateConfig(config.copy(chatbotWhatsAppEnabled = it))
+                            },
+                            enabled = isEnabled
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Forum, contentDescription = null, tint = Color(0xFF0084FF))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Facebook Messenger", style = MaterialTheme.typography.bodyMedium)
+                        }
+                        Switch(
+                            checked = isMessengerEnabled,
+                            onCheckedChange = {
+                                isMessengerEnabled = it
+                                viewModel.updateConfig(config.copy(chatbotMessengerEnabled = it))
+                            },
+                            enabled = isEnabled
+                        )
+                    }
+
+                    Divider(modifier = Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outlineVariant)
+
+                    // Live Chat Handover & Auto TrxID Verification Switches
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("লাইভ চ্যাট হ্যান্ডওভার (স্মার্ট বিরতি)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                            Text("আপনি যখন নিজে চ্যাট করবেন, তখন বট ১৫ মিনিটের জন্য স্বয়ংক্রিয়ভাবে থেমে থাকবে।", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(
+                            checked = liveChatHandover,
+                            onCheckedChange = {
+                                liveChatHandover = it
+                                viewModel.updateConfig(config.copy(liveChatHandoverActive = it))
+                            }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("TrxID পেমেন্ট অটো-ভেরিফিকেশন", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                            Text("কাস্টমার ট্রানজেকশন আইডি দিলে সাথে সাথে চেক করে প্রোডাক্ট ভিআইপি লিংক পাঠিয়ে দেবে।", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(
+                            checked = autoVerify,
+                            onCheckedChange = {
+                                autoVerify = it
+                                viewModel.updateConfig(config.copy(chatbotAutoVerifyPayment = it))
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        // Gemini AI API Configuration Card
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Google Gemini AI কনফিগারেশন",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Gemini API Key বসালে বট মানুষের মতো বন্ধুত্বপূর্ণ ও আকর্ষণীয় বাংলায় কথা বলবে। কী না থাকলে স্মার্ট বাংলা ফলব্যাক দিয়ে কাজ করবে।",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    OutlinedTextField(
+                        value = apiKey,
+                        onValueChange = { apiKey = it },
+                        label = { Text("Gemini API Key (AI Studio)") },
+                        placeholder = { Text("AIzaSy...") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("input_gemini_api_key"),
+                        singleLine = true,
+                        visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { showApiKey = !showApiKey }) {
+                                Icon(
+                                    imageVector = if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = "Toggle API Key visibility"
+                                )
+                            }
+                        }
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Model Selection
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf("gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-pro").forEach { model ->
+                            FilterChip(
+                                selected = selectedModel == model,
+                                onClick = { selectedModel = model },
+                                label = { Text(model) }
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Prompt Customizer Toggle
+                    TextButton(
+                        onClick = { showPromptEditor = !showPromptEditor },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            imageVector = if (showPromptEditor) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = null
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(if (showPromptEditor) "বটের নির্দেশনাবলী বন্ধ করুন" else "বটের সেলস নির্দেশনা (Custom Prompt) এডিট করুন")
+                    }
+
+                    AnimatedVisibility(visible = showPromptEditor) {
+                        Column {
+                            OutlinedTextField(
+                                value = prompt,
+                                onValueChange = { prompt = it },
+                                label = { Text("AI সেলস নির্দেশনা (Prompt Instructions)") },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(180.dp),
+                                maxLines = 10
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            TextButton(
+                                onClick = { prompt = DEFAULT_CHATBOT_PROMPT }
+                            ) {
+                                Text("ডিফল্ট প্রম্পটে রিসেট করুন", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Button(
+                        onClick = {
+                            viewModel.updateConfig(
+                                config.copy(
+                                    chatbotEnabled = isEnabled,
+                                    chatbotWhatsAppEnabled = isWhatsAppEnabled,
+                                    chatbotMessengerEnabled = isMessengerEnabled,
+                                    geminiApiKey = apiKey.trim(),
+                                    geminiModel = selectedModel,
+                                    chatbotCustomPrompt = prompt.trim(),
+                                    chatbotAutoVerifyPayment = autoVerify,
+                                    liveChatHandoverActive = liveChatHandover
+                                )
+                            )
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("btn_save_chatbot_config")
+                    ) {
+                        Icon(Icons.Default.Save, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("চ্যাটবট সেটিংস সংরক্ষণ করুন", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        // Interactive Test Chat Simulator Card
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Science,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "লাইভ চ্যাট সিমুলেটর (টেস্ট করুন)",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "কাস্টমারের মতো করে মেসেজ লিখে দেখুন বট কীভাবে মানুষের মতো সুন্দর করে উত্তর দেয়।",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Chat messages bubble container
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                color = MaterialTheme.colorScheme.surface,
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        simulatorChatHistory.forEach { (sender, msg) ->
+                            val isCustomer = sender == "কাস্টমার"
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = if (isCustomer) Arrangement.End else Arrangement.Start
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(
+                                        topStart = 12.dp,
+                                        topEnd = 12.dp,
+                                        bottomStart = if (isCustomer) 12.dp else 2.dp,
+                                        bottomEnd = if (isCustomer) 2.dp else 12.dp
+                                    ),
+                                    color = if (isCustomer) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer,
+                                    modifier = Modifier.widthIn(max = 280.dp)
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp)) {
+                                        Text(
+                                            text = sender,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isCustomer) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = msg,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = if (isCustomer) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        if (isTestingChat) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.Start
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.secondaryContainer,
+                                    modifier = Modifier.padding(4.dp)
+                                ) {
+                                    Text(
+                                        text = "AI উত্তর ভাবছে...",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Input & Send
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = simulatorInput,
+                            onValueChange = { simulatorInput = it },
+                            placeholder = { Text("যেমন: মেগা বান্ডেলের দাম কত?") },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("simulator_input"),
+                            singleLine = true
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        IconButton(
+                            onClick = {
+                                val text = simulatorInput.trim()
+                                if (text.isNotBlank() && !isTestingChat) {
+                                    val newHistory = simulatorChatHistory + ("কাস্টমার" to text)
+                                    simulatorChatHistory = newHistory
+                                    simulatorInput = ""
+                                    isTestingChat = true
+
+                                    viewModel.testChatbotReply(context, text) { reply ->
+                                        simulatorChatHistory = newHistory + ("বট" to reply)
+                                        isTestingChat = false
+                                    }
+                                }
+                            },
+                            enabled = !isTestingChat && simulatorInput.isNotBlank(),
+                            modifier = Modifier
+                                .size(48.dp)
+                                .background(MaterialTheme.colorScheme.primary, CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Send,
+                                contentDescription = "Send",
+                                tint = MaterialTheme.colorScheme.onPrimary
+                            )
+                        }
+                    }
+
+                    // Quick prompt chips
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        SuggestionChip(
+                            onClick = { simulatorInput = "মেগা বান্ডেলে কী কী আছে?" },
+                            label = { Text("বান্ডেল বিবরণ", style = MaterialTheme.typography.labelSmall) }
+                        )
+                        SuggestionChip(
+                            onClick = { simulatorInput = "টাকা পাঠিয়েছি TrxID: 9J47AB89C1" },
+                            label = { Text("টাকা পাঠিয়েছি", style = MaterialTheme.typography.labelSmall) }
+                        )
+                    }
+                }
+            }
+        }
+
+        // Live Bot Activity Logs
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.History, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "সাম্প্রতিক বট অ্যাক্টিভিটি (${botActivities.size})",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    if (botActivities.isEmpty()) {
+                        Text(
+                            text = "এখনও কোনো মেসেজের উত্তর পাঠানো হয়নি। নোটিফিকেশন আসলে এখানে লাইভ দেখতে পাবেন।",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            botActivities.take(5).forEach { item ->
+                                BotActivityRow(
+                                    item = item,
+                                    onResumeBot = { viewModel.resumeBotForSender(item.senderName) }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(40.dp))
+        }
+    }
+}
+
+@Composable
+fun BotActivityRow(
+    item: ChatbotActivityItem,
+    onResumeBot: () -> Unit
+) {
+    val timeFormat = SimpleDateFormat("hh:mm a", Locale.getDefault())
+    val formattedTime = timeFormat.format(Date(item.timestamp))
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (item.platform.contains("WhatsApp", ignoreCase = true)) Color(0xFF25D366) else Color(0xFF0084FF)
+                    ) {
+                        Text(
+                            text = item.platform,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = item.senderName,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Text(
+                    text = formattedTime,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline
+                )
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "মেসেজ: \"${item.incomingMessage}\"",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = "উত্তর: \"${item.replyMessage}\"",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            if (item.isLiveChatPaused) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "⏸ লাইভ চ্যাটের জন্য বট পজ করা হয়েছে",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    TextButton(onClick = onResumeBot, contentPadding = PaddingValues(0.dp)) {
+                        Text("এখনই আনপজ করুন", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+        }
+    }
+}

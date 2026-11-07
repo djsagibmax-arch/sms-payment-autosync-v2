@@ -94,6 +94,7 @@ class SyncForegroundService : Service() {
         when (intent?.action) {
             ACTION_STOP -> {
                 isServiceRunning = false
+                com.example.network.SupabaseRealtimeManager.stop()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 return START_NOT_STICKY
@@ -102,6 +103,8 @@ class SyncForegroundService : Service() {
                 isServiceRunning = true
                 startForeground(NOTIFICATION_ID, buildNotification(0, 0.0))
                 monitorStats()
+                // Start Supabase Realtime & Polling triggers for WhatsApp automation
+                com.example.network.SupabaseRealtimeManager.start(applicationContext)
                 return START_STICKY
             }
         }
@@ -172,10 +175,11 @@ class SyncForegroundService : Service() {
         if (config.cellfinEnabled) wallets.add("Cellfin")
 
         val walletSummary = if (wallets.isEmpty()) "No wallets active" else wallets.joinToString(", ")
+        val waStatus = if (config.whatsappAutomationEnabled) " • WhatsApp Auto: ON" else ""
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("SMS Payment AutoSync Running (24/7)")
-            .setContentText("Listening: $walletSummary • Synced: $successCount")
+            .setContentText("Listening: $walletSummary$waStatus • Synced: $successCount")
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -203,6 +207,7 @@ class SyncForegroundService : Service() {
         super.onDestroy()
         isServiceRunning = false
         statsJob?.cancel()
+        com.example.network.SupabaseRealtimeManager.stop()
         try {
             if (wakeLock?.isHeld == true) {
                 wakeLock?.release()
