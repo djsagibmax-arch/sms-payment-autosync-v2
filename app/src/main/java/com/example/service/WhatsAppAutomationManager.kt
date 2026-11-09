@@ -1,8 +1,10 @@
 package com.example.service
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.ComponentName
 import android.content.Context
+import android.view.accessibility.AccessibilityManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -131,25 +133,55 @@ object WhatsAppAutomationManager {
     fun isAccessibilityServiceEnabled(context: Context): Boolean {
         if (WhatsAppAccessibilityService.isConnected) return true
 
-        val expectedComponentName = ComponentName(context, WhatsAppAccessibilityService::class.java)
-        val enabledServicesSetting = Settings.Secure.getString(
-            context.contentResolver,
-            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-        ) ?: return false
-
-        val colonSplitter = TextUtils.SimpleStringSplitter(':')
-        colonSplitter.setString(enabledServicesSetting)
-
-        while (colonSplitter.hasNext()) {
-            val componentNameString = colonSplitter.next()
-            if (componentNameString.contains("WhatsAppAccessibilityService", ignoreCase = true)) {
-                return true
+        // 1. Official Android AccessibilityManager API (reliable across all Android versions)
+        try {
+            val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
+            if (am != null) {
+                val enabledServices = am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+                for (service in enabledServices) {
+                    val serviceInfo = service.resolveInfo?.serviceInfo
+                    if (serviceInfo != null) {
+                        val pkg = serviceInfo.packageName
+                        val name = serviceInfo.name
+                        if (pkg == context.packageName &&
+                            (name == WhatsAppAccessibilityService::class.java.name || name.endsWith("WhatsAppAccessibilityService"))
+                        ) {
+                            return true
+                        }
+                    }
+                }
             }
-            val enabledComponent = ComponentName.unflattenFromString(componentNameString)
-            if (enabledComponent != null && (enabledComponent == expectedComponentName || enabledComponent.className.endsWith("WhatsAppAccessibilityService"))) {
-                return true
-            }
+        } catch (e: Exception) {
+            Log.d(TAG, "AccessibilityManager check fallback: ${e.message}")
         }
+
+        // 2. Settings.Secure check (fallback for older or custom Android builds)
+        try {
+            val expectedComponentName = ComponentName(context, WhatsAppAccessibilityService::class.java)
+            val enabledServicesSetting = Settings.Secure.getString(
+                context.contentResolver,
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+            )
+            if (!enabledServicesSetting.isNullOrBlank()) {
+                val colonSplitter = TextUtils.SimpleStringSplitter(':')
+                colonSplitter.setString(enabledServicesSetting)
+                while (colonSplitter.hasNext()) {
+                    val componentNameString = colonSplitter.next()
+                    if (componentNameString.contains("WhatsAppAccessibilityService", ignoreCase = true)) {
+                        return true
+                    }
+                    val enabledComponent = ComponentName.unflattenFromString(componentNameString)
+                    if (enabledComponent != null &&
+                        (enabledComponent == expectedComponentName || enabledComponent.className.endsWith("WhatsAppAccessibilityService"))
+                    ) {
+                        return true
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "Settings.Secure check fallback: ${e.message}")
+        }
+
         return false
     }
 

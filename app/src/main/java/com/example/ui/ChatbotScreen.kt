@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.sp
 import com.example.model.DEFAULT_CHATBOT_PROMPT
 import com.example.model.SyncConfig
 import com.example.service.ChatbotActivityItem
+import com.example.service.GeminiCallResult
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -58,6 +59,11 @@ fun ChatbotScreen(
 
     var showApiKey by remember { mutableStateOf(false) }
     var showPromptEditor by remember { mutableStateOf(false) }
+
+    // Gemini API Connection Ping Test State
+    var isPingingGemini by remember { mutableStateOf(false) }
+    var pingResultText by remember { mutableStateOf<String?>(null) }
+    var pingSuccess by remember { mutableStateOf<Boolean?>(null) }
 
     // Test Chat Simulator State
     var simulatorInput by remember { mutableStateOf("") }
@@ -512,6 +518,45 @@ fun ChatbotScreen(
                         }
                     )
 
+                    val cleanApiInput = apiKey.trim().removeSurrounding("\"").removeSurrounding("'")
+                    if (cleanApiInput.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        if (cleanApiInput.startsWith("AIzaSy")) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(14.dp))
+                                Text(
+                                    text = "সঠিক Google AI Studio API Key ফরম্যাট (AIzaSy...)",
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF047857),
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        } else if (cleanApiInput.startsWith("AQ.") || cleanApiInput.startsWith("ya29.")) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(8.dp),
+                                    verticalAlignment = Alignment.Top,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                                    Text(
+                                        text = "সতর্কতা: আপনার কি-টি 'AQ.' দিয়ে শুরু হয়েছে (OAuth Token)। Google AI Studio-র মূল API Key সবসময় 'AIzaSy...' দিয়ে ৩৯ অক্ষরের হয়। এটি এরর দিলে aistudio.google.com -> 'Get API key' থেকে মূল কী কপি করুন।",
+                                        fontSize = 11.sp,
+                                        lineHeight = 16.sp,
+                                        color = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(10.dp))
 
                     Text(
@@ -567,6 +612,66 @@ fun ChatbotScreen(
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
                     )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Dedicated 1-Click Gemini API Connection Test
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                if (apiKey.isBlank()) {
+                                    pingResultText = "⚠️ দয়া করে প্রথমে উপরে আপনার Gemini API Key লিখুন।"
+                                    pingSuccess = false
+                                    return@OutlinedButton
+                                }
+                                isPingingGemini = true
+                                pingResultText = null
+                                pingSuccess = null
+                                viewModel.testGeminiConnection(apiKey, selectedModel) { res ->
+                                    isPingingGemini = false
+                                    pingSuccess = res.isSuccess
+                                    pingResultText = if (res.isSuccess) {
+                                        "✓ Gemini API সফলভাবে সংযুক্ত হয়েছে! মডেল: ${res.modelUsed} (রেসপন্স সময়: ${res.latencyMs}ms)"
+                                    } else {
+                                        "❌ কানেকশন ব্যর্থ: ${res.errorMessage}"
+                                    }
+                                }
+                            },
+                            enabled = !isPingingGemini,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.testTag("btn_test_gemini_ping")
+                        ) {
+                            if (isPingingGemini) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("API যাচাই করা হচ্ছে...", fontSize = 12.sp)
+                            } else {
+                                Icon(Icons.Default.NetworkCheck, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Gemini API কানেকশন টেস্ট করুন", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    if (pingResultText != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (pingSuccess == true) Color(0xFF10B981).copy(alpha = 0.15f) else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = pingResultText ?: "",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (pingSuccess == true) Color(0xFF047857) else MaterialTheme.colorScheme.onErrorContainer,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        }
+                    }
 
                     Spacer(modifier = Modifier.height(12.dp))
 
@@ -657,37 +762,53 @@ fun ChatbotScreen(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "লাইভ চ্যাট সিমুলেটর (টেস্ট করুন)",
+                                text = "লাইভ চ্যাট সিমুলেটর (টেস্ট)",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
                             )
                         }
 
-                        if (simulatorChatHistory.isNotEmpty()) {
-                            TextButton(
-                                onClick = { simulatorChatHistory = emptyList() },
-                                modifier = Modifier.testTag("btn_clear_simulator_chat")
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isCustomReplyEnabled) Color(0xFF25D366).copy(alpha = 0.15f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.DeleteSweep,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = "চ্যাট মুছুন",
-                                    color = MaterialTheme.colorScheme.error,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
+                                    text = if (isCustomReplyEnabled) "মোড: কাস্টমাইজ" else "মোড: Gemini AI",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isCustomReplyEnabled) Color(0xFF1E8E3E) else MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                 )
+                            }
+
+                            if (simulatorChatHistory.isNotEmpty()) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                TextButton(
+                                    onClick = { simulatorChatHistory = emptyList() },
+                                    modifier = Modifier.testTag("btn_clear_simulator_chat")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.DeleteSweep,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(2.dp))
+                                    Text(
+                                        text = "মুছুন",
+                                        color = MaterialTheme.colorScheme.error,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
                             }
                         }
                     }
 
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "কাস্টমারের মতো করে মেসেজ লিখে দেখুন বট কীভাবে মানুষের মতো সুন্দর করে উত্তর দেয়।",
+                        text = "এখানে সরাসরি Gemini AI API রেসপন্স পরীক্ষা করা যাবে। কোনো অফলাইন মোবাইল বট মেসেজ দেওয়া হবে না—শুধু জেমিনি এআই এপিআই সক্রিয় আছে কি না তা যাচাই করা যাবে।",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

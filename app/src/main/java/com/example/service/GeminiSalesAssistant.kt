@@ -18,6 +18,14 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
 
+data class GeminiCallResult(
+    val isSuccess: Boolean,
+    val replyText: String = "",
+    val modelUsed: String = "",
+    val errorMessage: String? = null,
+    val latencyMs: Long = 0L
+)
+
 object GeminiSalesAssistant {
     private const val TAG = "GeminiSalesAssistant"
     private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
@@ -34,7 +42,10 @@ object GeminiSalesAssistant {
     private val TRX_ID_REGEX = Pattern.compile("\\b([0-9A-Z]{8,10})\\b", Pattern.CASE_INSENSITIVE)
 
     /**
-     * Generates a smart, human-like sales response for an incoming customer message.
+     * Generates a response strictly based on the user's selected mode:
+     * Mode 1: Custom Automation (customAutoReplyEnabled == true)
+     * Mode 2: AI Automation (Gemini API with API Key)
+     * If neither is active or Gemini fails, no unwanted default/fallback message is sent.
      */
     suspend fun generateReply(
         context: Context,
@@ -58,7 +69,7 @@ object GeminiSalesAssistant {
             }
         }
 
-        // 2. Custom Fixed Auto-Reply (If Custom Reply Switch is ON)
+        // Mode 1: কাস্টমাইজ অটোমেশন (যদি কাস্টম সুইচ চালু থাকে)
         if (config.customAutoReplyEnabled) {
             val customText = config.customAutoReplyMessage
                 .replace("{name}", senderName)
@@ -70,20 +81,19 @@ object GeminiSalesAssistant {
             }
         }
 
-        // 3. If Gemini API Key is configured, use Gemini API for human-like conversational sales!
+        // Mode 2: AI অটোমেশন (Gemini API থেকে সরাসরি উত্তর)
         if (config.geminiApiKey.isNotBlank()) {
-            try {
-                val aiReply = callGeminiApi(config, senderName, cleanedMsg, products)
-                if (aiReply.isNotBlank()) {
-                    return@withContext aiReply
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Gemini API error: ${e.message}. Falling back to rule-based response.", e)
+            val result = callGeminiApiDetailed(config, senderName, cleanedMsg, products)
+            if (result.isSuccess && result.replyText.isNotBlank()) {
+                return@withContext result.replyText
+            } else {
+                Log.w(TAG, "Gemini API error: ${result.errorMessage}. No automatic message sent.")
+                return@withContext ""
             }
         }
 
-        // 4. Fallback Rule-Based Human Sales Response (Works 100% even without API key)
-        return@withContext generateSmartFallback(senderName, cleanedMsg, products)
+        // ডিফল্টভাবে কোনো মেসেজ যাবে না যতক্ষণ না ইউজার কাস্টম মেসেজ চালু করবেন বা Gemini API দেবেন
+        return@withContext ""
     }
 
     /**
@@ -138,14 +148,22 @@ Technography • Instant Digital Delivery""".trimIndent()
     }
 
     /**
-     * Calls Gemini API with the full product knowledge base.
+     * Calls Gemini API with the full product knowledge base and returns detailed diagnostic results.
      */
-    private fun callGeminiApi(
+    fun callGeminiApiDetailed(
         config: SyncConfig,
         customerName: String,
         message: String,
         products: List<ProductEntity>
-    ): String {
+    ): GeminiCallResult {
+        val cleanKey = config.geminiApiKey.trim().removeSurrounding("\"").removeSurrounding("'")
+        if (cleanKey.isBlank()) {
+            return GeminiCallResult(
+                isSuccess = false,
+                errorMessage = "Gemini API Key খালি রয়েছে। দয়া করে aistudio.google.com থেকে API Key প্রদান করুন।"
+            )
+        }
+
         val productListText = products.joinToString("\n") { prod ->
             "• ${prod.name}: ${prod.price.toInt()} ৳ | VIP Link: ${prod.vipLink} | বিবরণ: ${prod.description}"
         }
@@ -167,7 +185,17 @@ $productListText
         val fullPrompt = "$systemInstruction\n\nকাস্টমার বলেছে: \"$message\"\n\nঅ্যাসিস্ট্যান্টের উত্তর:"
 
         val primaryModel = normalizeModelName(config.geminiModel.ifBlank { "gemini-3.8-flash" })
-        val candidateModels = listOf(primaryModel, "gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash").distinct()
+        val candidateModels = listOf(
+            primaryModel,
+            "gemini-2.5-flash",
+            "gemini-1.5-flash",
+            "gemini-2.0-flash",
+            "gemini-flash-latest",
+            "gemini-3.8-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-pro",
+            "gemini-4-argon"
+        ).distinct()
 
         val jsonBody = JSONObject().apply {
             val contentsArr = JSONArray().apply {
@@ -183,21 +211,40 @@ $productListText
             put("contents", contentsArr)
             put("generationConfig", JSONObject().apply {
                 put("temperature", 0.7)
-                put("maxOutputTokens", 350)
+                put("maxOutputTokens", 400)
             })
         }
 
+        var lastErrorMsg = "Gemini API থেকে কোনো রেসপন্স পাওয়া যায়নি।"
+        val startTime = System.currentTimeMillis()
+
         for (model in candidateModels) {
-            val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=${config.geminiApiKey.trim()}"
-            val request = Request.Builder()
+            val isToken = cleanKey.startsWith("AQ.") || cleanKey.startsWith("ya29.")
+            val endpoint = if (isToken) {
+                "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent"
+            } else {
+                "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$cleanKey"
+            }
+
+            val requestBuilder = Request.Builder()
                 .url(endpoint)
+                .addHeader("Content-Type", "application/json")
                 .post(jsonBody.toString().toRequestBody(JSON_MEDIA))
-                .build()
+
+            if (isToken) {
+                requestBuilder.addHeader("Authorization", "Bearer $cleanKey")
+            } else {
+                requestBuilder.addHeader("x-goog-api-key", cleanKey)
+            }
+
+            val request = requestBuilder.build()
 
             try {
                 val response = httpClient.newCall(request).execute()
+                val latency = System.currentTimeMillis() - startTime
+                val responseText = response.body?.string() ?: ""
+
                 if (response.isSuccessful) {
-                    val responseText = response.body?.string() ?: ""
                     val resJson = JSONObject(responseText)
                     val candidates = resJson.optJSONArray("candidates")
                     if (candidates != null && candidates.length() > 0) {
@@ -206,18 +253,177 @@ $productListText
                         val parts = content?.optJSONArray("parts")
                         if (parts != null && parts.length() > 0) {
                             val text = parts.getJSONObject(0).optString("text", "")
-                            if (text.isNotBlank()) return text.trim()
+                            if (text.isNotBlank()) {
+                                return GeminiCallResult(
+                                    isSuccess = true,
+                                    replyText = text.trim(),
+                                    modelUsed = model,
+                                    latencyMs = latency
+                                )
+                            }
                         }
                     }
                 } else {
-                    val errBody = response.body?.string() ?: ""
-                    Log.w(TAG, "Gemini API HTTP Error on model $model: ${response.code} $errBody")
+                    var parsedError = "HTTP ${response.code}"
+                    var errorReason = ""
+                    try {
+                        val errJson = JSONObject(responseText)
+                        val errObj = errJson.optJSONObject("error")
+                        if (errObj != null) {
+                            val msg = errObj.optString("message", "")
+                            val status = errObj.optString("status", "")
+                            val details = errObj.optJSONArray("details")
+                            if (details != null && details.length() > 0) {
+                                errorReason = details.getJSONObject(0).optString("reason", "")
+                            }
+                            parsedError = "$status: $msg"
+                        }
+                    } catch (_: Exception) {}
+
+                    lastErrorMsg = formatGeminiErrorMessage(response.code, parsedError, errorReason, model, cleanKey)
+                    Log.w(TAG, "Gemini API HTTP Error on model $model: $parsedError")
+
+                    // If error is auth failure, trying other models won't help with bad credentials
+                    if (response.code == 401 || response.code == 400 && errorReason == "API_KEY_INVALID") {
+                        break
+                    }
                 }
             } catch (e: Exception) {
+                lastErrorMsg = "কানেকশন ত্রুটি ($model): ${e.localizedMessage ?: e.message}"
                 Log.e(TAG, "Gemini call exception on model $model: ${e.message}")
             }
         }
-        return ""
+
+        return GeminiCallResult(
+            isSuccess = false,
+            errorMessage = lastErrorMsg
+        )
+    }
+
+    /**
+     * Dedicated 1-Click Ping test to verify whether the Gemini API Key is valid and working.
+     */
+    fun testGeminiPing(apiKey: String, modelName: String): GeminiCallResult {
+        val cleanKey = apiKey.trim().removeSurrounding("\"").removeSurrounding("'")
+        if (cleanKey.isBlank()) {
+            return GeminiCallResult(isSuccess = false, errorMessage = "API Key খালি রাখা যাবে না।")
+        }
+
+        val primaryModel = normalizeModelName(modelName.ifBlank { "gemini-3.8-flash" })
+        val candidateModels = listOf(
+            primaryModel,
+            "gemini-2.5-flash",
+            "gemini-1.5-flash",
+            "gemini-2.0-flash",
+            "gemini-flash-latest",
+            "gemini-3.8-flash",
+            "gemini-3.5-flash-lite"
+        ).distinct()
+
+        val jsonBody = JSONObject().apply {
+            val contentsArr = JSONArray().apply {
+                put(JSONObject().apply {
+                    put("role", "user")
+                    put("parts", JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("text", "Hello, answer with only 'CONNECTED' to confirm API connection.")
+                        })
+                    })
+                })
+            }
+            put("contents", contentsArr)
+            put("generationConfig", JSONObject().apply {
+                put("maxOutputTokens", 10)
+            })
+        }
+
+        val startTime = System.currentTimeMillis()
+        var lastError = "কোনো রেসপন্স পাওয়া যায়নি"
+
+        for (model in candidateModels) {
+            val isToken = cleanKey.startsWith("AQ.") || cleanKey.startsWith("ya29.")
+            val endpoint = if (isToken) {
+                "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent"
+            } else {
+                "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$cleanKey"
+            }
+
+            val requestBuilder = Request.Builder()
+                .url(endpoint)
+                .addHeader("Content-Type", "application/json")
+                .post(jsonBody.toString().toRequestBody(JSON_MEDIA))
+
+            if (isToken) {
+                requestBuilder.addHeader("Authorization", "Bearer $cleanKey")
+            } else {
+                requestBuilder.addHeader("x-goog-api-key", cleanKey)
+            }
+
+            val request = requestBuilder.build()
+
+            try {
+                val response = httpClient.newCall(request).execute()
+                val latency = System.currentTimeMillis() - startTime
+                val body = response.body?.string() ?: ""
+
+                if (response.isSuccessful) {
+                    return GeminiCallResult(
+                        isSuccess = true,
+                        replyText = "সংযুক্ত হয়েছে",
+                        modelUsed = model,
+                        latencyMs = latency
+                    )
+                } else {
+                    var parsedError = "HTTP ${response.code}"
+                    var errorReason = ""
+                    try {
+                        val errJson = JSONObject(body)
+                        val errObj = errJson.optJSONObject("error")
+                        if (errObj != null) {
+                            val msg = errObj.optString("message", "")
+                            val status = errObj.optString("status", "")
+                            val details = errObj.optJSONArray("details")
+                            if (details != null && details.length() > 0) {
+                                errorReason = details.getJSONObject(0).optString("reason", "")
+                            }
+                            parsedError = "$status: $msg"
+                        }
+                    } catch (_: Exception) {}
+
+                    lastError = formatGeminiErrorMessage(response.code, parsedError, errorReason, model, cleanKey)
+
+                    if (response.code == 401 || (response.code == 400 && errorReason == "API_KEY_INVALID")) {
+                        break
+                    }
+                }
+            } catch (e: Exception) {
+                lastError = e.localizedMessage ?: "কানেকশন ফেইল্ড"
+            }
+        }
+
+        return GeminiCallResult(isSuccess = false, errorMessage = lastError)
+    }
+
+    private fun formatGeminiErrorMessage(
+        code: Int,
+        parsedError: String,
+        errorReason: String,
+        model: String,
+        apiKey: String
+    ): String {
+        return when {
+            code == 401 || errorReason == "ACCESS_TOKEN_TYPE_UNSUPPORTED" || errorReason == "API_KEY_INVALID" -> {
+                if (apiKey.startsWith("AQ.")) {
+                    "API Key টি 'AQ.' ফরম্যাটের (OAuth Token)। Google AI Studio-র মূল API Key সাধারণত 'AIzaSy...' দিয়ে ৩৯ অক্ষরের হয়ে থাকে। দয়া করে aistudio.google.com -> 'Get API key' থেকে মূল API Key টি কপি করুন।"
+                } else {
+                    "API Key সঠিক নয় (HTTP $code: $parsedError)। দয়া করে aistudio.google.com থেকে নতুন API Key তৈরি করে বসান।"
+                }
+            }
+            code == 403 -> "অনুমতি নেই (HTTP 403: Generative Language API পারমিশন বা প্রজেক্ট রেস্ট্রিকশন চেক করুন)।"
+            code == 404 -> "মডেল '$model' খুঁজে পাওয়া যায়নি (HTTP 404)।"
+            code == 429 -> "API ব্যবহারের সীমা শেষ (Quota Limit Exceeded / HTTP 429)। অনুগ্রহ করে কিছুক্ষণ পর চেষ্টা করুন।"
+            else -> "মডেল $model ত্রুটি (HTTP $code): $parsedError"
+        }
     }
 
     private fun normalizeModelName(raw: String): String {

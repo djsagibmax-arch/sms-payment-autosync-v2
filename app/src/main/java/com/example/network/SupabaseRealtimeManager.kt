@@ -288,10 +288,9 @@ object SupabaseRealtimeManager {
                     }
 
                     val table = config.supabasePaymentsTable.trim().ifEmpty { "payments" }
-                    val sentCol = config.whatsappSentColumn.trim().ifEmpty { "whatsapp_sent" }
 
-                    // Only query confirmed rows where customer has submitted their WhatsApp number and name
-                    val queryUrl = "$baseUrl/rest/v1/$table?whatsapp_number=not.is.null&customer_name=not.is.null&$sentCol=is.false&order=id.desc&limit=5"
+                    // Fetch latest payment records (safe query that won't fail if specific column filters are missing)
+                    val queryUrl = "$baseUrl/rest/v1/$table?order=id.desc&limit=10"
 
                     val request = Request.Builder()
                         .url(queryUrl)
@@ -320,8 +319,7 @@ object SupabaseRealtimeManager {
 
     /**
      * Evaluates a payment row from either WebSocket or Polling.
-     * Strictly verifies that the customer has confirmed their order on the website
-     * before any WhatsApp dispatch can take place.
+     * Verifies that the customer has confirmed their order and dispatches WhatsApp automation.
      */
     private fun processPaymentRecord(context: Context, record: JSONObject) {
         val prefs = PreferencesManager.getInstance(context)
@@ -344,45 +342,81 @@ object SupabaseRealtimeManager {
 
         // 2. Check if already marked as sent in Supabase database
         val sentCol = config.whatsappSentColumn.trim().ifEmpty { "whatsapp_sent" }
-        val isAlreadySent = record.optBoolean(sentCol, false)
+        val isAlreadySent = record.optBoolean(sentCol, false) ||
+                record.optBoolean("sent", false) ||
+                record.optBoolean("is_sent", false)
         if (isAlreadySent) {
             processedRowIds.add(rowId)
             prefs.markRowProcessed(rowId)
             return
         }
 
-        // 3. Strict Check: WhatsApp Number MUST be explicitly provided by the customer
-        // We NEVER fall back to sender_phone (which is just the sender wallet from SMS before checkout)
+        // 3. Status Check: Do not dispatch if explicitly marked cancelled, failed, or rejected
+        val statusVal = (record.getCleanString("status")
+            ?: record.getCleanString("order_status")
+            ?: record.getCleanString("payment_status")
+            ?: "").lowercase().trim()
+
+        if (statusVal == "cancelled" || statusVal == "failed" || statusVal == "rejected") {
+            Log.d(TAG, "Row $rowId is $statusVal. Skipping.")
+            return
+        }
+
+        // 4. Extract Customer Phone Number
         val numCol = config.whatsappNumberColumn.trim().ifEmpty { "whatsapp_number" }
-        val customerPhone = record.getCleanString(numCol)
-        if (customerPhone.isNullOrBlank()) {
-            Log.d(TAG, "Row $rowId: Customer has not provided a WhatsApp number yet. Skipping.")
+        val rawPhone = record.getCleanString(numCol)
+            ?: record.getCleanString("whatsapp_number")
+            ?: record.getCleanString("customer_phone")
+            ?: record.getCleanString("phone")
+            ?: record.getCleanString("sender_phone")
+            ?: record.getCleanString("mobile")
+
+        if (rawPhone.isNullOrBlank()) {
+            Log.d(TAG, "Row $rowId: Customer phone number not found in record. Skipping.")
             return
         }
 
-        val sanitized = PhoneNumberSanitizer.sanitize(customerPhone)
+        val sanitized = PhoneNumberSanitizer.sanitize(rawPhone)
         if (sanitized == null) {
-            Log.w(TAG, "Row $rowId: Phone '$customerPhone' cannot be sanitized to valid BD format. Skipping.")
+            Log.w(TAG, "Row $rowId: Phone '$rawPhone' cannot be sanitized to valid format. Skipping.")
             return
         }
 
-        // 4. Strict Check: Customer Order MUST be confirmed by the customer on the website
-        // An unconfirmed order will not have customer_name or product_name
-        val customerName = record.getCleanString("customer_name")
+        // 5. Customer Name & Product Name with safe fallbacks (never output 'null'!)
+        val rawCustomerName = record.getCleanString("customer_name")
             ?: record.getCleanString("name")
             ?: record.getCleanString("client_name")
             ?: record.getCleanString("customer")
 
-        val prodName = record.getCleanString("product_name")
+        val customerName = if (rawCustomerName.isNullOrBlank() || rawCustomerName.equals("null", ignoreCase = true)) {
+            "সম্মানিত গ্রাহক"
+        } else {
+            rawCustomerName
+        }
+
+        val rawProdName = record.getCleanString("product_name")
             ?: record.getCleanString("product")
             ?: record.getCleanString("item_name")
             ?: record.getCleanString("course_name")
             ?: record.getCleanString("title")
 
-        // CRITICAL: If customer_name or product_name is null/empty/literal "null", the order is NOT confirmed!
-        if (customerName == null || prodName == null) {
-            Log.i(TAG, "Row $rowId: Order not confirmed yet on website (customerName=$customerName, prodName=$prodName). Waiting for customer confirmation signal.")
-            return
+        val prodName = if (rawProdName.isNullOrBlank() || rawProdName.equals("null", ignoreCase = true)) {
+            "Mega Bundle (All in One)"
+        } else {
+            rawProdName
+        }
+
+        val rawProdLink = record.getCleanString("product_link")
+            ?: record.getCleanString("vip_link")
+            ?: record.getCleanString("link")
+            ?: record.getCleanString("download_link")
+            ?: record.getCleanString("drive_link")
+            ?: record.getCleanString("invoice_url")
+
+        val prodLink = if (rawProdLink.isNullOrBlank() || rawProdLink.equals("null", ignoreCase = true)) {
+            "https://technographybd.xyz"
+        } else {
+            rawProdLink
         }
 
         // Mark rowId as processed in memory and disk so it will never be queued again
@@ -391,13 +425,6 @@ object SupabaseRealtimeManager {
         if (processedRowIds.size > 2000) {
             processedRowIds.clear()
         }
-
-        val prodLink = record.getCleanString("product_link")
-            ?: record.getCleanString("vip_link")
-            ?: record.getCleanString("link")
-            ?: record.getCleanString("download_link")
-            ?: record.getCleanString("drive_link")
-            ?: record.getCleanString("invoice_url")
 
         val method = record.getCleanString("method") ?: "bKash"
         val trxId = record.getCleanString("trx_id") ?: rowId

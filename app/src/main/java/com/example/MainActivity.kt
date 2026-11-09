@@ -294,10 +294,19 @@ fun MainAppContent(
                 mutableStateOf(KeepAliveHelper.isBatteryOptimizationIgnored(context))
             }
 
-            LaunchedEffect(Unit) {
-                viewModel.refreshWhatsAppState(context)
-                viewModel.refreshNotificationAccessState(context)
-                isBatteryIgnored = KeepAliveHelper.isBatteryOptimizationIgnored(context)
+            val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+            DisposableEffect(lifecycleOwner) {
+                val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                    if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                        viewModel.refreshWhatsAppState(context)
+                        viewModel.refreshNotificationAccessState(context)
+                        isBatteryIgnored = KeepAliveHelper.isBatteryOptimizationIgnored(context)
+                    }
+                }
+                lifecycleOwner.lifecycle.addObserver(observer)
+                onDispose {
+                    lifecycleOwner.lifecycle.removeObserver(observer)
+                }
             }
 
             var isBannerDismissed by remember { mutableStateOf(false) }
