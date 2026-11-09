@@ -83,7 +83,7 @@ object WhatsAppAutomationManager {
     }
 
     fun markClickInitiated() {
-        isPending = false
+        // Keep isPending = true until confirmed click or timeout to protect against race conditions
     }
 
     private val _automationState = MutableStateFlow(WhatsAppAutomationState())
@@ -245,11 +245,10 @@ object WhatsAppAutomationManager {
 
             val intent = Intent(Intent.ACTION_VIEW, uri).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                // Prefer WhatsApp Business if standard is not present, or standard if present
-                if (isStandardWhatsAppInstalled(context)) {
-                    setPackage("com.whatsapp")
-                } else if (isBusinessWhatsAppInstalled(context)) {
+                if (isBusinessWhatsAppInstalled(context) && !isStandardWhatsAppInstalled(context)) {
                     setPackage("com.whatsapp.w4b")
+                } else if (isStandardWhatsAppInstalled(context) && !isBusinessWhatsAppInstalled(context)) {
+                    setPackage("com.whatsapp")
                 }
             }
 
@@ -267,14 +266,11 @@ object WhatsAppAutomationManager {
             )
 
             context.startActivity(intent)
-            if (!rowId.isNullOrBlank()) {
-                PreferencesManager.getInstance(context).markRowProcessed(rowId)
-            }
             Log.i(TAG, "WhatsApp intent launched for phone: $sanitizedPhone, rowId: $rowId")
 
-            // Timeout safety: expire after 20 seconds if send button wasn't clicked
+            // Timeout safety: expire after 25 seconds if send button wasn't clicked
             scope.launch {
-                delay(20000L)
+                delay(25000L)
                 if (isPending && pendingRowId == rowId) {
                     Log.w(TAG, "Automation timeout reached for rowId: $rowId. Resetting pending state.")
                     isPending = false
@@ -318,7 +314,7 @@ object WhatsAppAutomationManager {
         if (config.whatsappAutoBack) {
             scope.launch {
                 // Wait for WhatsApp to complete message dispatch animation
-                delay(1000L)
+                delay(1200L)
                 withContext(Dispatchers.Main) {
                     try {
                         service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
@@ -333,7 +329,9 @@ object WhatsAppAutomationManager {
         // Update Supabase whatsapp_sent = true and log to Room DB
         scope.launch {
             if (!rowId.isNullOrBlank()) {
+                PreferencesManager.getInstance(context).markRowProcessed(rowId)
                 markSupabaseRowSent(context, config, rowId)
+                com.example.network.SupabaseRealtimeManager.onRowSentSuccessfully(rowId)
             }
 
             // Save log to local Room DB
@@ -378,11 +376,16 @@ object WhatsAppAutomationManager {
 
         val table = config.supabasePaymentsTable.trim().ifEmpty { "payments" }
         val sentCol = config.whatsappSentColumn.trim().ifEmpty { "whatsapp_sent" }
-        val targetUrl = "$baseUrl/rest/v1/$table?id=eq.$rowId"
+        val targetUrl = if (rowId.toLongOrNull() != null) {
+            "$baseUrl/rest/v1/$table?id=eq.$rowId"
+        } else {
+            "$baseUrl/rest/v1/$table?trx_id=eq.$rowId"
+        }
 
         try {
             val json = JSONObject().apply {
                 put(sentCol, true)
+                put("whatsapp_sent", true)
             }
             val body = json.toString().toRequestBody(JSON_MEDIA)
 
@@ -397,7 +400,7 @@ object WhatsAppAutomationManager {
 
             val response = httpClient.newCall(request).execute()
             if (response.isSuccessful) {
-                Log.i(TAG, "Successfully updated $sentCol=true for Supabase row: $rowId")
+                Log.i(TAG, "Successfully updated $sentCol=true in Supabase for row: $rowId")
             } else {
                 Log.e(TAG, "Failed to update Supabase row $rowId: HTTP ${response.code} ${response.message}")
             }

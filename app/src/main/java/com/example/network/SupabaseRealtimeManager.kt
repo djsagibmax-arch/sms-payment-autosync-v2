@@ -64,6 +64,14 @@ object SupabaseRealtimeManager {
     private val processedRowIds = Collections.synchronizedSet(LinkedHashSet<String>())
     private val pendingQueue = ConcurrentLinkedQueue<PaymentQueueItem>()
 
+    @Volatile
+    private var inFlightRowId: String? = null
+
+    fun onRowSentSuccessfully(rowId: String) {
+        processedRowIds.add(rowId)
+        _lastEventLog.value = "Sent successfully for row #$rowId"
+    }
+
     private val _status = MutableStateFlow(RealtimeStatus.DISCONNECTED)
     val status: StateFlow<RealtimeStatus> = _status.asStateFlow()
 
@@ -278,8 +286,8 @@ object SupabaseRealtimeManager {
                         }
 
                         val table = config.supabasePaymentsTable.trim().ifEmpty { "payments" }
-                        // Query the latest 15 records in descending order
-                        val queryUrl = "$baseUrl/rest/v1/$table?order=id.desc&limit=15"
+                        // Query only confirmed records where whatsapp_sent is false, ordered by id descending
+                        val queryUrl = "$baseUrl/rest/v1/$table?whatsapp_sent=eq.false&order=id.desc&limit=10"
 
                         val request = Request.Builder()
                             .url(queryUrl)
@@ -322,7 +330,6 @@ object SupabaseRealtimeManager {
 
         val rowId = record.getCleanString("id") ?: record.getCleanString("trx_id")
         if (rowId.isNullOrBlank()) {
-            Log.w(TAG, "Payment record has no valid id or trx_id. Skipping.")
             return
         }
 
@@ -336,7 +343,7 @@ object SupabaseRealtimeManager {
             return
         }
 
-        // 2. In-memory deduplication check (prevents re-queuing while already in queue or currently sending)
+        // 2. In-memory deduplication check (prevents re-queuing while already sent)
         if (processedRowIds.contains(rowId)) {
             return
         }
@@ -352,17 +359,16 @@ object SupabaseRealtimeManager {
             return
         }
 
-        // 4. Extract Customer Phone Number
+        // 4. Must be a confirmed order with a valid customer WhatsApp number!
+        // When customer has not yet confirmed order on website, whatsapp_number is null.
         val numCol = config.whatsappNumberColumn.trim().ifEmpty { "whatsapp_number" }
         val rawPhone = record.getCleanString(numCol)
             ?: record.getCleanString("whatsapp_number")
             ?: record.getCleanString("customer_phone")
             ?: record.getCleanString("phone")
-            ?: record.getCleanString("sender_phone")
-            ?: record.getCleanString("mobile")
 
         if (rawPhone.isNullOrBlank()) {
-            Log.d(TAG, "Row $rowId: Customer phone number not found in record. Skipping.")
+            Log.d(TAG, "Row $rowId: Customer WhatsApp number not found (unconfirmed order). Skipping.")
             return
         }
 
@@ -372,7 +378,18 @@ object SupabaseRealtimeManager {
             return
         }
 
-        // 5. Customer Name & Product Name with safe fallbacks (never output 'null'!)
+        // If is_used exists in row, it must be true (meaning confirmed by customer on website)
+        if (record.has("is_used") && !record.optBoolean("is_used", false)) {
+            Log.d(TAG, "Row $rowId: Order is_used is false (unconfirmed). Skipping.")
+            return
+        }
+
+        // 5. Prevent duplicate queueing if already in queue or currently sending
+        if (pendingQueue.any { it.rowId == rowId } || inFlightRowId == rowId) {
+            return
+        }
+
+        // 6. Customer Name & Product Name with safe fallbacks (never output 'null'!)
         val rawCustomerName = record.getCleanString("customer_name")
             ?: record.getCleanString("name")
             ?: record.getCleanString("client_name")
@@ -407,13 +424,6 @@ object SupabaseRealtimeManager {
             "https://technographybd.xyz"
         } else {
             rawProdLink
-        }
-
-        // Mark rowId as processed in memory and disk so it will never be queued again
-        processedRowIds.add(rowId)
-        prefs.markRowProcessed(rowId)
-        if (processedRowIds.size > 2000) {
-            processedRowIds.clear()
         }
 
         val method = record.getCleanString("method") ?: "bKash"
@@ -467,9 +477,6 @@ object SupabaseRealtimeManager {
                     if (!WhatsAppAutomationManager.isPending) {
                         val config = PreferencesManager.getInstance(context).loadConfig()
 
-                        // Prepare message:
-                        // 1. If the website generated an exact custom_message in the database row, use it!
-                        // 2. Otherwise, use the template with dynamic product, link, and payment variables.
                         val formattedAmount = if (item.amount % 1.0 == 0.0) item.amount.toInt().toString() else item.amount.toString()
                         val message = if (!item.customMessage.isNullOrBlank()) {
                             item.customMessage
@@ -489,6 +496,7 @@ object SupabaseRealtimeManager {
                                 .replace("{phone}", item.phone)
                         }
 
+                        inFlightRowId = item.rowId
                         val dispatched = WhatsAppAutomationManager.triggerSend(
                             context = context,
                             rawPhone = item.phone,
@@ -500,14 +508,22 @@ object SupabaseRealtimeManager {
                         )
 
                         if (dispatched) {
-                            pendingQueue.poll() // Remove item
-                            _pendingCount.value = pendingQueue.size
                             _lastEventLog.value = "Dispatched WhatsApp to +${item.phone}"
-                            // Wait at least 6 seconds before attempting next queue item
-                            delay(6000L)
+                            // Wait while WhatsApp automation sends the message
+                            var waitedMs = 0L
+                            while (WhatsAppAutomationManager.isPending && isActive && isRunning && waitedMs < 26000L) {
+                                delay(500L)
+                                waitedMs += 500L
+                            }
+                            pendingQueue.poll() // Remove item after completion
+                            inFlightRowId = null
+                            _pendingCount.value = pendingQueue.size
+                            // Wait 3 seconds before attempting next queue item
+                            delay(3000L)
                         } else {
                             // If failed to launch (e.g. invalid), drop it
                             pendingQueue.poll()
+                            inFlightRowId = null
                             _pendingCount.value = pendingQueue.size
                             delay(2000L)
                         }

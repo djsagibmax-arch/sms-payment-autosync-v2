@@ -75,34 +75,43 @@ class WhatsAppAccessibilityService : AccessibilityService() {
 
     private fun processActiveWindow(config: com.example.model.SyncConfig) {
         val rootNode = rootInActiveWindow ?: return
-        val sendButton = findSendButton(rootNode)
+        val initialBtn = findSendButton(rootNode)
 
-        if (sendButton != null && sendButton.isEnabled) {
+        if (initialBtn != null && initialBtn.isEnabled) {
             isClickInProgress = true
-            // Immediately mark click as initiated so no other accessibility event can trigger another click!
-            WhatsAppAutomationManager.markClickInitiated()
-
-            val delayMs = config.whatsappSendDelayMs.coerceIn(800L, 3000L)
-            Log.i(TAG, "Send button detected! Waiting safe delay of ${delayMs}ms before auto-click...")
+            val delayMs = config.whatsappSendDelayMs.coerceIn(500L, 2000L)
+            Log.i(TAG, "WhatsApp Send button detected. Waiting ${delayMs}ms to click freshly...")
 
             mainHandler.postDelayed({
                 try {
-                    // Re-query or perform click on the found button
-                    var success = sendButton.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                    if (!success) {
-                        // Try clicking parent container if child is not directly clickable
-                        success = sendButton.parent?.performAction(AccessibilityNodeInfo.ACTION_CLICK) ?: false
+                    // Check if request is still valid
+                    if (!WhatsAppAutomationManager.isPending) {
+                        return@postDelayed
+                    }
+
+                    // Query window FRESHLY so node is not stale or recycled by Android
+                    val freshRoot = rootInActiveWindow
+                    val freshBtn = findSendButton(freshRoot) ?: initialBtn
+
+                    var success = false
+                    if (freshBtn != null) {
+                        success = freshBtn.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                        if (!success && freshBtn.parent != null) {
+                            success = freshBtn.parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                        }
                     }
 
                     if (success) {
-                        Log.i(TAG, "Successfully clicked WhatsApp Send button!")
+                        Log.i(TAG, "✓ Successfully clicked WhatsApp Send button!")
                         WhatsAppAutomationManager.onSendSuccess(applicationContext, this@WhatsAppAccessibilityService)
                     } else {
-                        Log.w(TAG, "Click action returned false on node. Retrying root search...")
-                        val freshRoot = rootInActiveWindow
-                        val freshBtn = findSendButton(freshRoot)
-                        freshBtn?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                        WhatsAppAutomationManager.onSendSuccess(applicationContext, this@WhatsAppAccessibilityService)
+                        Log.w(TAG, "First click action returned false, retrying with all clickable ancestors...")
+                        val retryRoot = rootInActiveWindow
+                        val retryBtn = findSendButton(retryRoot)
+                        if (retryBtn != null && retryBtn.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                            Log.i(TAG, "✓ Successfully clicked WhatsApp Send button on retry!")
+                            WhatsAppAutomationManager.onSendSuccess(applicationContext, this@WhatsAppAccessibilityService)
+                        }
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error executing click action: ${e.message}", e)
