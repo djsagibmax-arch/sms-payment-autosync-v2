@@ -2,7 +2,9 @@ package com.example
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -13,6 +15,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -68,31 +71,40 @@ class MainActivity : ComponentActivity() {
             return list.toTypedArray()
         }
 
+    private var permissionClickAttempts = 0
+
     private val permissionRequestLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
         val allGranted = result.values.all { it }
         Log.d("MainActivity", "Permission auto-request result: allGranted=$allGranted, details=$result")
         if (allGranted) {
-            // Automatically start the foreground service once permissions are granted
             SyncForegroundService.start(this)
             viewModel.refreshServiceState()
+        } else {
+            // If permissions were denied or system suppressed the dialog, open App Settings so user can enable directly
+            openAppSystemSettings()
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // Unconditionally ensure 24/7 service and Supabase listener are running
+        try {
+            SyncForegroundService.start(this)
+            com.example.network.SupabaseRealtimeManager.start(this)
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Failed to start services in onCreate: ${e.message}")
+        }
         viewModel.refreshServiceState()
 
         val sp = getSharedPreferences("app_launch_prefs", Context.MODE_PRIVATE)
         val hasPromptedInitial = sp.getBoolean("has_prompted_initial_permissions", false)
 
         val hasSms = ContextCompat.checkSelfPermission(this, Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
-        if (hasSms) {
-            SyncForegroundService.start(this)
-            viewModel.refreshServiceState()
-        } else if (!hasPromptedInitial) {
+        if (!hasSms && !hasPromptedInitial) {
             sp.edit().putBoolean("has_prompted_initial_permissions", true).apply()
             checkAndRequestAllPermissions()
         }
@@ -110,12 +122,39 @@ class MainActivity : ComponentActivity() {
         val missingPermissions = requiredPermissions.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
-        if (missingPermissions.isNotEmpty()) {
-            permissionRequestLauncher.launch(missingPermissions.toTypedArray())
-        } else {
-            // Already have permissions, ensure service is running
+        if (missingPermissions.isEmpty()) {
             SyncForegroundService.start(this)
+            com.example.network.SupabaseRealtimeManager.start(this)
             viewModel.refreshServiceState()
+            return
+        }
+
+        permissionClickAttempts++
+        // On 2nd attempt or if the system refuses to show rationale (permanently denied), go straight to App Details Settings
+        val cannotShowRationale = missingPermissions.any {
+            !androidx.core.app.ActivityCompat.shouldShowRequestPermissionRationale(this, it)
+        }
+        if (permissionClickAttempts > 1 || cannotShowRationale) {
+            openAppSystemSettings()
+        } else {
+            permissionRequestLauncher.launch(missingPermissions.toTypedArray())
+        }
+    }
+
+    private fun openAppSystemSettings() {
+        try {
+            val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = android.net.Uri.fromParts("package", packageName, null)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            startActivity(intent)
+            android.widget.Toast.makeText(
+                this,
+                "দয়া করে অ্যাপ সেটিংসে 'Permissions'-এ ট্যাপ করে SMS ও নোটিফিকেশন চালু করুন",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Failed to open settings: ${e.message}")
         }
     }
 
@@ -207,7 +246,10 @@ fun MainAppContent(
                     Surface(
                         shape = RoundedCornerShape(20.dp),
                         color = if (isServiceRunning && hasSmsPermissions) StatusSuccess.copy(alpha = 0.15f) else StatusFailed.copy(alpha = 0.15f),
-                        modifier = Modifier.padding(end = 8.dp)
+                        modifier = Modifier
+                            .padding(end = 8.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .clickable { onRecheckPermissions() }
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -298,8 +340,10 @@ fun MainAppContent(
             DisposableEffect(lifecycleOwner) {
                 val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
                     if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                        hasSmsPermissions = ContextCompat.checkSelfPermission(context, Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
                         viewModel.refreshWhatsAppState(context)
                         viewModel.refreshNotificationAccessState(context)
+                        viewModel.refreshServiceState()
                         isBatteryIgnored = KeepAliveHelper.isBatteryOptimizationIgnored(context)
                     }
                 }

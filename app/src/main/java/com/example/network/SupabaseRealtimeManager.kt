@@ -269,50 +269,41 @@ object SupabaseRealtimeManager {
         pollingJob?.cancel()
         pollingJob = managerScope?.launch {
             while (isActive && isRunning) {
-                // If WebSocket is actively listening to real-time events, do not poll aggressively!
-                if (_status.value == RealtimeStatus.LISTENING) {
-                    delay(30000L)
-                    continue
-                }
-
-                delay(20000L)
                 try {
                     val config = PreferencesManager.getInstance(context).loadConfig()
-                    if (!config.whatsappAutomationEnabled || config.supabaseUrl.isBlank() || config.supabaseApiKey.isBlank()) {
-                        continue
-                    }
+                    if (config.whatsappAutomationEnabled && config.supabaseUrl.isNotBlank() && config.supabaseApiKey.isNotBlank()) {
+                        var baseUrl = config.supabaseUrl.trim().removeSuffix("/")
+                        if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
+                            baseUrl = "https://$baseUrl"
+                        }
 
-                    var baseUrl = config.supabaseUrl.trim().removeSuffix("/")
-                    if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
-                        baseUrl = "https://$baseUrl"
-                    }
+                        val table = config.supabasePaymentsTable.trim().ifEmpty { "payments" }
+                        // Query the latest 15 records in descending order
+                        val queryUrl = "$baseUrl/rest/v1/$table?order=id.desc&limit=15"
 
-                    val table = config.supabasePaymentsTable.trim().ifEmpty { "payments" }
+                        val request = Request.Builder()
+                            .url(queryUrl)
+                            .addHeader("apikey", config.supabaseApiKey.trim())
+                            .addHeader("Authorization", "Bearer ${config.supabaseApiKey.trim()}")
+                            .addHeader("Content-Type", "application/json")
+                            .build()
 
-                    // Fetch latest payment records (safe query that won't fail if specific column filters are missing)
-                    val queryUrl = "$baseUrl/rest/v1/$table?order=id.desc&limit=10"
-
-                    val request = Request.Builder()
-                        .url(queryUrl)
-                        .addHeader("apikey", config.supabaseApiKey.trim())
-                        .addHeader("Authorization", "Bearer ${config.supabaseApiKey.trim()}")
-                        .addHeader("Content-Type", "application/json")
-                        .build()
-
-                    val response = httpClient.newCall(request).execute()
-                    if (response.isSuccessful) {
-                        val body = response.body?.string() ?: ""
-                        if (body.startsWith("[")) {
-                            val array = JSONArray(body)
-                            for (i in 0 until array.length()) {
-                                val item = array.getJSONObject(i)
-                                processPaymentRecord(context, item)
+                        val response = httpClient.newCall(request).execute()
+                        if (response.isSuccessful) {
+                            val body = response.body?.string() ?: ""
+                            if (body.startsWith("[")) {
+                                val array = JSONArray(body)
+                                for (i in 0 until array.length()) {
+                                    val item = array.getJSONObject(i)
+                                    processPaymentRecord(context, item)
+                                }
                             }
                         }
                     }
                 } catch (e: Exception) {
-                    Log.d(TAG, "Fallback polling check: ${e.message}")
+                    Log.d(TAG, "Continuous polling check: ${e.message}")
                 }
+                delay(6000L) // Resilient 6-second polling loop
             }
         }
     }
@@ -335,19 +326,18 @@ object SupabaseRealtimeManager {
             return
         }
 
-        // 1. Persistent deduplication check: has this row already been processed?
-        if (processedRowIds.contains(rowId) || prefs.isRowProcessed(rowId)) {
-            return
-        }
-
-        // 2. Check if already marked as sent in Supabase database
+        // 1. Check if already marked as sent in Supabase database
         val sentCol = config.whatsappSentColumn.trim().ifEmpty { "whatsapp_sent" }
         val isAlreadySent = record.optBoolean(sentCol, false) ||
                 record.optBoolean("sent", false) ||
                 record.optBoolean("is_sent", false)
         if (isAlreadySent) {
             processedRowIds.add(rowId)
-            prefs.markRowProcessed(rowId)
+            return
+        }
+
+        // 2. In-memory deduplication check (prevents re-queuing while already in queue or currently sending)
+        if (processedRowIds.contains(rowId)) {
             return
         }
 

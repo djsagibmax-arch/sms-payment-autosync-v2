@@ -521,20 +521,27 @@ fun ChatbotScreen(
                     val cleanApiInput = apiKey.trim().removeSurrounding("\"").removeSurrounding("'")
                     if (cleanApiInput.isNotBlank()) {
                         Spacer(modifier = Modifier.height(6.dp))
-                        if (cleanApiInput.startsWith("AIzaSy")) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        if (cleanApiInput.startsWith("AIzaSy") || cleanApiInput.startsWith("AQ.") || cleanApiInput.length >= 30) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFF10B981).copy(alpha = 0.15f),
+                                modifier = Modifier.fillMaxWidth()
                             ) {
-                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(14.dp))
-                                Text(
-                                    text = "সঠিক Google AI Studio API Key ফরম্যাট (AIzaSy...)",
-                                    fontSize = 11.sp,
-                                    color = Color(0xFF047857),
-                                    fontWeight = FontWeight.Medium
-                                )
+                                Row(
+                                    modifier = Modifier.padding(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(16.dp))
+                                    Text(
+                                        text = "✓ Google AI Studio API Key প্রস্তুত (${cleanApiInput.take(6)}...${cleanApiInput.takeLast(4)})",
+                                        fontSize = 11.sp,
+                                        color = Color(0xFF047857),
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
-                        } else if (cleanApiInput.startsWith("AQ.") || cleanApiInput.startsWith("ya29.")) {
+                        } else {
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
                                 color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
@@ -547,7 +554,7 @@ fun ChatbotScreen(
                                 ) {
                                     Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
                                     Text(
-                                        text = "সতর্কতা: আপনার কি-টি 'AQ.' দিয়ে শুরু হয়েছে (OAuth Token)। Google AI Studio-র মূল API Key সবসময় 'AIzaSy...' দিয়ে ৩৯ অক্ষরের হয়। এটি এরর দিলে aistudio.google.com -> 'Get API key' থেকে মূল কী কপি করুন।",
+                                        text = "সতর্কতা: Google AI Studio থেকে সম্পূর্ণ API Key কপি করে পেস্ট করুন।",
                                         fontSize = 11.sp,
                                         lineHeight = 16.sp,
                                         color = MaterialTheme.colorScheme.onErrorContainer
@@ -568,10 +575,11 @@ fun ChatbotScreen(
                     Spacer(modifier = Modifier.height(6.dp))
 
                     val modelOptions = listOf(
-                        "gemini-3.8-flash" to "3.8 Flash (All-around)",
-                        "gemini-3.5-flash-lite" to "3.5 Flash-Lite (Fast)",
-                        "gemini-3.1-pro" to "3.1 Pro (Reasoning)",
-                        "gemini-4-argon" to "4 Argon (Complex)"
+                        "gemini-3.5-flash-lite" to "3.5 Flash-Lite (Free Tier - Fastest)",
+                        "gemini-3.5-flash" to "3.5 Flash (Recommended)",
+                        "gemini-3.8-flash" to "3.8 Flash (Thinking Model)",
+                        "gemini-3.1-pro-preview" to "3.1 Pro (Reasoning)",
+                        "gemini-4-argon" to "4 Argon (Requires Paid Tier)"
                     )
 
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -579,27 +587,52 @@ fun ChatbotScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            modelOptions.take(2).forEach { (modelId, label) ->
-                                FilterChip(
-                                    selected = selectedModel == modelId,
-                                    onClick = { selectedModel = modelId },
-                                    label = { Text(label, fontSize = 11.sp, fontWeight = if (selectedModel == modelId) FontWeight.Bold else FontWeight.Normal) },
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
+                            FilterChip(
+                                selected = selectedModel == "gemini-3.5-flash-lite",
+                                onClick = { selectedModel = "gemini-3.5-flash-lite" },
+                                label = { Text("3.5 Flash-Lite (Free - Fast)", fontSize = 11.sp, fontWeight = if (selectedModel == "gemini-3.5-flash-lite") FontWeight.Bold else FontWeight.Normal) },
+                                modifier = Modifier.weight(1f)
+                            )
+                            FilterChip(
+                                selected = selectedModel == "gemini-3.5-flash",
+                                onClick = { selectedModel = "gemini-3.5-flash" },
+                                label = { Text("3.5 Flash (Recommended)", fontSize = 11.sp, fontWeight = if (selectedModel == "gemini-3.5-flash") FontWeight.Bold else FontWeight.Normal) },
+                                modifier = Modifier.weight(1f)
+                            )
                         }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            modelOptions.drop(2).forEach { (modelId, label) ->
-                                FilterChip(
-                                    selected = selectedModel == modelId,
-                                    onClick = { selectedModel = modelId },
-                                    label = { Text(label, fontSize = 11.sp, fontWeight = if (selectedModel == modelId) FontWeight.Bold else FontWeight.Normal) },
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
+                            FilterChip(
+                                selected = selectedModel == "gemini-3.8-flash",
+                                onClick = { selectedModel = "gemini-3.8-flash" },
+                                label = { Text("3.8 Flash (Thinking)", fontSize = 11.sp, fontWeight = if (selectedModel == "gemini-3.8-flash") FontWeight.Bold else FontWeight.Normal) },
+                                modifier = Modifier.weight(1f)
+                            )
+                            FilterChip(
+                                selected = selectedModel == "gemini-4-argon",
+                                onClick = { selectedModel = "gemini-4-argon" },
+                                label = { Text("4 Argon (Paid)", fontSize = 11.sp, fontWeight = if (selectedModel == "gemini-4-argon") FontWeight.Bold else FontWeight.Normal) },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+
+                    if (selectedModel == "gemini-4-argon") {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "ℹ️ দ্রষ্টব্য: আপনার Google AI Studio প্রজেক্টে বিলিং সেটআপ না থাকলে (Free Tier) gemini-4-argon কোটা ০ থাকে (HTTP 429 দেয়)। বিনামূল্যে আনলিমিটেড ব্যবহার করতে '3.5 Flash-Lite' বা '3.8 Flash' নির্বাচন করুন।",
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                modifier = Modifier.padding(8.dp)
+                            )
                         }
                     }
 

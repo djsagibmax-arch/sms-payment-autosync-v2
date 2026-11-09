@@ -18,6 +18,7 @@ class SmsAutoSyncApp : Application() {
         if (config.autoStartService) {
             try {
                 SyncForegroundService.start(this)
+                com.example.network.SupabaseRealtimeManager.start(this)
             } catch (e: Exception) {
                 Log.w("SmsAutoSyncApp", "Could not autostart foreground service at boot: ${e.message}")
             }

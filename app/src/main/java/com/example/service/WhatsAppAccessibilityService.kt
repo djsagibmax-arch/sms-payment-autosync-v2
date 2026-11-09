@@ -53,9 +53,9 @@ class WhatsAppAccessibilityService : AccessibilityService() {
             return
         }
 
-        // Safety timeout: if more than 15 seconds passed since the app triggered the intent, expire it!
+        // Safety timeout: if more than 30 seconds passed since the app triggered the intent, expire it!
         val elapsed = System.currentTimeMillis() - WhatsAppAutomationManager.dispatchTimeMillis
-        if (elapsed > 15000L || elapsed < 0L) {
+        if (elapsed > 30000L || elapsed < 0L) {
             Log.w(TAG, "WhatsApp dispatch request expired ($elapsed ms). Ignoring.")
             WhatsAppAutomationManager.cancelPending()
             return
@@ -126,20 +126,22 @@ class WhatsAppAccessibilityService : AccessibilityService() {
         val isSendId = viewId.endsWith(":id/send") ||
                 viewId.contains("send_container") ||
                 viewId.endsWith(":id/send_btn") ||
-                viewId.endsWith(":id/btn_send")
+                viewId.endsWith(":id/btn_send") ||
+                viewId.endsWith(":id/fab")
 
         val isSendDesc = desc == "send" ||
                 desc == "পাঠান" ||
                 desc == "send message" ||
                 desc == "পাঠিয়ে দিন" ||
+                desc == "বার্তা পাঠান" ||
                 desc == "প্রেরণ" ||
-                desc.contains("send") ||
+                (desc.contains("send") && !desc.contains("sender")) ||
                 desc.contains("পাঠান")
 
-        val isSendText = text == "send" || text == "পাঠান"
+        val isSendText = text == "send" || text == "পাঠান" || text.contains("send")
 
         // Make sure it's not voice note / audio record button
-        val isVoiceNote = desc.contains("voice") || desc.contains("ভয়েস") || desc.contains("record")
+        val isVoiceNote = desc.contains("voice") || desc.contains("ভয়েস") || desc.contains("record") || viewId.contains("voice")
 
         if ((isSendId || isSendDesc || isSendText) && !isVoiceNote) {
             if (node.isClickable || node.parent?.isClickable == true) {

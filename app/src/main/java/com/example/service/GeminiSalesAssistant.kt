@@ -32,9 +32,9 @@ object GeminiSalesAssistant {
 
     private val httpClient by lazy {
         OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
-            .writeTimeout(15, TimeUnit.SECONDS)
+            .connectTimeout(25, TimeUnit.SECONDS)
+            .readTimeout(25, TimeUnit.SECONDS)
+            .writeTimeout(25, TimeUnit.SECONDS)
             .build()
     }
 
@@ -184,16 +184,15 @@ $productListText
 
         val fullPrompt = "$systemInstruction\n\nকাস্টমার বলেছে: \"$message\"\n\nঅ্যাসিস্ট্যান্টের উত্তর:"
 
-        val primaryModel = normalizeModelName(config.geminiModel.ifBlank { "gemini-3.8-flash" })
+        val primaryModel = normalizeModelName(config.geminiModel.ifBlank { "gemini-3.5-flash-lite" })
         val candidateModels = listOf(
             primaryModel,
-            "gemini-2.5-flash",
-            "gemini-1.5-flash",
-            "gemini-2.0-flash",
-            "gemini-flash-latest",
-            "gemini-3.8-flash",
             "gemini-3.5-flash-lite",
-            "gemini-3.1-pro",
+            "gemini-3.5-flash",
+            "gemini-3.8-flash",
+            "gemini-flash-lite-latest",
+            "gemini-flash-latest",
+            "gemini-3.1-pro-preview",
             "gemini-4-argon"
         ).distinct()
 
@@ -219,25 +218,14 @@ $productListText
         val startTime = System.currentTimeMillis()
 
         for (model in candidateModels) {
-            val isToken = cleanKey.startsWith("AQ.") || cleanKey.startsWith("ya29.")
-            val endpoint = if (isToken) {
-                "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent"
-            } else {
-                "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$cleanKey"
-            }
+            val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$cleanKey"
 
-            val requestBuilder = Request.Builder()
+            val request = Request.Builder()
                 .url(endpoint)
                 .addHeader("Content-Type", "application/json")
+                .addHeader("x-goog-api-key", cleanKey)
                 .post(jsonBody.toString().toRequestBody(JSON_MEDIA))
-
-            if (isToken) {
-                requestBuilder.addHeader("Authorization", "Bearer $cleanKey")
-            } else {
-                requestBuilder.addHeader("x-goog-api-key", cleanKey)
-            }
-
-            val request = requestBuilder.build()
+                .build()
 
             try {
                 val response = httpClient.newCall(request).execute()
@@ -284,7 +272,7 @@ $productListText
                     Log.w(TAG, "Gemini API HTTP Error on model $model: $parsedError")
 
                     // If error is auth failure, trying other models won't help with bad credentials
-                    if (response.code == 401 || response.code == 400 && errorReason == "API_KEY_INVALID") {
+                    if (response.code == 401 || (response.code == 400 && errorReason == "API_KEY_INVALID")) {
                         break
                     }
                 }
@@ -309,15 +297,14 @@ $productListText
             return GeminiCallResult(isSuccess = false, errorMessage = "API Key খালি রাখা যাবে না।")
         }
 
-        val primaryModel = normalizeModelName(modelName.ifBlank { "gemini-3.8-flash" })
+        val primaryModel = normalizeModelName(modelName.ifBlank { "gemini-3.5-flash-lite" })
         val candidateModels = listOf(
             primaryModel,
-            "gemini-2.5-flash",
-            "gemini-1.5-flash",
-            "gemini-2.0-flash",
-            "gemini-flash-latest",
+            "gemini-3.5-flash-lite",
+            "gemini-3.5-flash",
             "gemini-3.8-flash",
-            "gemini-3.5-flash-lite"
+            "gemini-flash-lite-latest",
+            "gemini-flash-latest"
         ).distinct()
 
         val jsonBody = JSONObject().apply {
@@ -341,25 +328,14 @@ $productListText
         var lastError = "কোনো রেসপন্স পাওয়া যায়নি"
 
         for (model in candidateModels) {
-            val isToken = cleanKey.startsWith("AQ.") || cleanKey.startsWith("ya29.")
-            val endpoint = if (isToken) {
-                "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent"
-            } else {
-                "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$cleanKey"
-            }
+            val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$cleanKey"
 
-            val requestBuilder = Request.Builder()
+            val request = Request.Builder()
                 .url(endpoint)
                 .addHeader("Content-Type", "application/json")
+                .addHeader("x-goog-api-key", cleanKey)
                 .post(jsonBody.toString().toRequestBody(JSON_MEDIA))
-
-            if (isToken) {
-                requestBuilder.addHeader("Authorization", "Bearer $cleanKey")
-            } else {
-                requestBuilder.addHeader("x-goog-api-key", cleanKey)
-            }
-
-            val request = requestBuilder.build()
+                .build()
 
             try {
                 val response = httpClient.newCall(request).execute()
@@ -412,16 +388,12 @@ $productListText
         apiKey: String
     ): String {
         return when {
-            code == 401 || errorReason == "ACCESS_TOKEN_TYPE_UNSUPPORTED" || errorReason == "API_KEY_INVALID" -> {
-                if (apiKey.startsWith("AQ.")) {
-                    "API Key টি 'AQ.' ফরম্যাটের (OAuth Token)। Google AI Studio-র মূল API Key সাধারণত 'AIzaSy...' দিয়ে ৩৯ অক্ষরের হয়ে থাকে। দয়া করে aistudio.google.com -> 'Get API key' থেকে মূল API Key টি কপি করুন।"
-                } else {
-                    "API Key সঠিক নয় (HTTP $code: $parsedError)। দয়া করে aistudio.google.com থেকে নতুন API Key তৈরি করে বসান।"
-                }
+            code == 401 || errorReason == "API_KEY_INVALID" -> {
+                "API Key সঠিক নয় (HTTP $code: $parsedError)। দয়া করে aistudio.google.com থেকে সঠিক API Key কপি করুন।"
             }
-            code == 403 -> "অনুমতি নেই (HTTP 403: Generative Language API পারমিশন বা প্রজেক্ট রেস্ট্রিকশন চেক করুন)।"
-            code == 404 -> "মডেল '$model' খুঁজে পাওয়া যায়নি (HTTP 404)।"
-            code == 429 -> "API ব্যবহারের সীমা শেষ (Quota Limit Exceeded / HTTP 429)। অনুগ্রহ করে কিছুক্ষণ পর চেষ্টা করুন।"
+            code == 403 -> "অনুমতি নেই (HTTP 403: Generative Language API পারমিশন চেক করুন)।"
+            code == 404 -> "মডেল '$model' বর্তমান API ভার্সনে পাওয়া যায়নি (HTTP 404)।"
+            code == 429 -> "মডেল '$model'-এ Free Tier সীমা অতিক্রম হয়েছে (HTTP 429)। অনুগ্রহ করে '3.5 Flash-Lite' সিলেক্ট করুন।"
             else -> "মডেল $model ত্রুটি (HTTP $code): $parsedError"
         }
     }
@@ -429,14 +401,11 @@ $productListText
     private fun normalizeModelName(raw: String): String {
         val clean = raw.trim().removePrefix("models/").lowercase()
         return when {
-            clean == "3.8 flash" || clean == "gemini-3.8-flash" -> "gemini-3.8-flash"
-            clean == "3.5 flash-lite" || clean == "gemini-3.5-flash-lite" -> "gemini-3.5-flash-lite"
-            clean == "3.1 pro" || clean == "gemini-3.1-pro" -> "gemini-3.1-pro"
-            clean == "4 argon" || clean == "gemini-4-argon" -> "gemini-4-argon"
-            clean.contains("3.8") -> "gemini-3.8-flash"
-            clean.contains("3.5") -> "gemini-3.5-flash-lite"
-            clean.contains("3.1") -> "gemini-3.1-pro"
-            clean.contains("argon") -> "gemini-4-argon"
+            clean == "3.5 flash-lite" || clean == "gemini-3.5-flash-lite" || clean.contains("3.5-flash-lite") || clean.contains("flash-lite") -> "gemini-3.5-flash-lite"
+            clean == "3.5 flash" || clean == "gemini-3.5-flash" -> "gemini-3.5-flash"
+            clean == "3.8 flash" || clean == "gemini-3.8-flash" || clean.contains("3.8") -> "gemini-3.8-flash"
+            clean == "3.1 pro" || clean == "gemini-3.1-pro" || clean.contains("3.1") -> "gemini-3.1-pro-preview"
+            clean == "4 argon" || clean == "gemini-4-argon" || clean.contains("argon") -> "gemini-4-argon"
             clean.startsWith("gemini-") -> clean
             else -> "gemini-$clean"
         }
