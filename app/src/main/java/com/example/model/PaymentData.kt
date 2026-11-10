@@ -91,7 +91,8 @@ data class SyncConfig(
     val whatsappSentColumn: String = "whatsapp_sent",
     val whatsappMessageTemplate: String = DEFAULT_VIP_WHATSAPP_TEMPLATE,
     val whatsappSendDelayMs: Long = 1200L,
-    val whatsappAutoBack: Boolean = true
+    val whatsappAutoBack: Boolean = true,
+    val preferredWhatsAppPackage: String = "com.whatsapp"
 )
 
 const val DEFAULT_VIP_WHATSAPP_TEMPLATE = """অভিনন্দন! আপনার অর্ডার কনফার্ম হয়েছে

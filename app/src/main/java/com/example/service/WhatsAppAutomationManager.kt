@@ -243,12 +243,21 @@ object WhatsAppAutomationManager {
             val encodedMessage = URLEncoder.encode(message, "UTF-8")
             val uri = Uri.parse("https://api.whatsapp.com/send?phone=$sanitizedPhone&text=$encodedMessage")
 
+            val config = PreferencesManager.getInstance(context).loadConfig()
+            val preferred = config.preferredWhatsAppPackage.trim()
+
+            val targetPackage = when {
+                preferred == "com.whatsapp.w4b" && isBusinessWhatsAppInstalled(context) -> "com.whatsapp.w4b"
+                preferred == "com.whatsapp" && isStandardWhatsAppInstalled(context) -> "com.whatsapp"
+                isStandardWhatsAppInstalled(context) -> "com.whatsapp"
+                isBusinessWhatsAppInstalled(context) -> "com.whatsapp.w4b"
+                else -> null
+            }
+
             val intent = Intent(Intent.ACTION_VIEW, uri).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                if (isBusinessWhatsAppInstalled(context) && !isStandardWhatsAppInstalled(context)) {
-                    setPackage("com.whatsapp.w4b")
-                } else if (isStandardWhatsAppInstalled(context) && !isBusinessWhatsAppInstalled(context)) {
-                    setPackage("com.whatsapp")
+                if (targetPackage != null) {
+                    setPackage(targetPackage)
                 }
             }
 

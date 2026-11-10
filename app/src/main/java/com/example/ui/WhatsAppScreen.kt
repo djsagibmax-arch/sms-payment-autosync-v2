@@ -50,6 +50,7 @@ fun WhatsAppScreen(
     var templateText by remember(config.whatsappMessageTemplate) { mutableStateOf(config.whatsappMessageTemplate) }
     var sendDelayMs by remember(config.whatsappSendDelayMs) { mutableStateOf(config.whatsappSendDelayMs) }
     var autoBack by remember(config.whatsappAutoBack) { mutableStateOf(config.whatsappAutoBack) }
+    var preferredPackage by remember(config.preferredWhatsAppPackage) { mutableStateOf(config.preferredWhatsAppPackage) }
 
     // Test form state
     var testPhone by remember { mutableStateOf("01712345678") }
@@ -136,7 +137,8 @@ fun WhatsAppScreen(
                                     whatsappSentColumn = sentCol,
                                     whatsappMessageTemplate = templateText,
                                     whatsappSendDelayMs = sendDelayMs,
-                                    whatsappAutoBack = autoBack
+                                    whatsappAutoBack = autoBack,
+                                    preferredWhatsAppPackage = preferredPackage
                                 )
                             )
                             if (it) {
@@ -193,36 +195,69 @@ fun WhatsAppScreen(
                     }
                 }
 
-                // WhatsApp App Installed Status
-                Row(
+                // WhatsApp App Installed Status & Selector
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Column {
-                        Text(
-                            text = "WhatsApp Application",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp
-                        )
-                        val appLabel = when {
-                            waState.isWhatsAppInstalled && waState.isBusinessInstalled -> "WhatsApp & Business উভয়ই ইনস্টল আছে"
-                            waState.isWhatsAppInstalled -> "Standard WhatsApp ইনস্টল আছে"
-                            waState.isBusinessInstalled -> "WhatsApp Business ইনস্টল আছে"
-                            else -> "WhatsApp ডিভাইসে খুঁজে পাওয়া যায়নি"
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "মেসেজ পাঠানোর WhatsApp অ্যাপ",
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp
+                            )
+                            Text(
+                                text = "আপনার যে অ্যাপে অ্যাকাউন্ট লগইন করা আছে সেটি সিলেক্ট রাখুন",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
-                        Text(
-                            text = appLabel,
-                            fontSize = 11.sp,
-                            color = if (waState.isWhatsAppInstalled || waState.isBusinessInstalled) StatusSuccess else StatusFailed
+
+                        Icon(
+                            imageVector = if (waState.isWhatsAppInstalled || waState.isBusinessInstalled) Icons.Default.CheckCircle else Icons.Default.Cancel,
+                            contentDescription = null,
+                            tint = if (waState.isWhatsAppInstalled || waState.isBusinessInstalled) StatusSuccess else StatusFailed
                         )
                     }
 
-                    Icon(
-                        imageVector = if (waState.isWhatsAppInstalled || waState.isBusinessInstalled) Icons.Default.CheckCircle else Icons.Default.Cancel,
-                        contentDescription = null,
-                        tint = if (waState.isWhatsAppInstalled || waState.isBusinessInstalled) StatusSuccess else StatusFailed
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = preferredPackage == "com.whatsapp",
+                            onClick = {
+                                preferredPackage = "com.whatsapp"
+                                viewModel.updateConfig(config.copy(preferredWhatsAppPackage = "com.whatsapp"))
+                            },
+                            label = { Text("WhatsApp Messenger (সাধারণ)") },
+                            leadingIcon = {
+                                if (preferredPackage == "com.whatsapp") {
+                                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilterChip(
+                            selected = preferredPackage == "com.whatsapp.w4b",
+                            onClick = {
+                                preferredPackage = "com.whatsapp.w4b"
+                                viewModel.updateConfig(config.copy(preferredWhatsAppPackage = "com.whatsapp.w4b"))
+                            },
+                            label = { Text("WhatsApp Business") },
+                            leadingIcon = {
+                                if (preferredPackage == "com.whatsapp.w4b") {
+                                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
                 }
 
                 // Supabase Realtime Listener Status
@@ -632,7 +667,8 @@ fun WhatsAppScreen(
                             whatsappSentColumn = sentCol,
                             whatsappMessageTemplate = templateText,
                             whatsappSendDelayMs = sendDelayMs,
-                            whatsappAutoBack = autoBack
+                            whatsappAutoBack = autoBack,
+                            preferredWhatsAppPackage = preferredPackage
                         )
                         viewModel.updateConfig(newConfig)
                         viewModel.restartRealtimeListener(context)

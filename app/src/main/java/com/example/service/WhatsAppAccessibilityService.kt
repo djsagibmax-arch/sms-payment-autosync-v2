@@ -75,24 +75,32 @@ class WhatsAppAccessibilityService : AccessibilityService() {
 
     private fun processActiveWindow(config: com.example.model.SyncConfig) {
         val rootNode = rootInActiveWindow ?: return
-        val initialBtn = findSendButton(rootNode)
 
+        // CRITICAL: Ensure we are actually inside an active chat conversation with the message input box!
+        // Never click anything on WhatsApp home screen, contact list, or menus!
+        if (!isConversationWindow(rootNode)) {
+            return
+        }
+
+        val initialBtn = findSendButton(rootNode)
         if (initialBtn != null && initialBtn.isEnabled) {
             isClickInProgress = true
             val delayMs = config.whatsappSendDelayMs.coerceIn(500L, 2000L)
-            Log.i(TAG, "WhatsApp Send button detected. Waiting ${delayMs}ms to click freshly...")
+            Log.i(TAG, "WhatsApp Send button detected in active chat. Waiting ${delayMs}ms to click freshly...")
 
             mainHandler.postDelayed({
                 try {
-                    // Check if request is still valid
                     if (!WhatsAppAutomationManager.isPending) {
                         return@postDelayed
                     }
 
-                    // Query window FRESHLY so node is not stale or recycled by Android
-                    val freshRoot = rootInActiveWindow
-                    val freshBtn = findSendButton(freshRoot) ?: initialBtn
+                    // Query window FRESHLY so node is not stale
+                    val freshRoot = rootInActiveWindow ?: rootNode
+                    if (!isConversationWindow(freshRoot)) {
+                        return@postDelayed
+                    }
 
+                    val freshBtn = findSendButton(freshRoot) ?: initialBtn
                     var success = false
                     if (freshBtn != null) {
                         success = freshBtn.performAction(AccessibilityNodeInfo.ACTION_CLICK)
@@ -105,9 +113,9 @@ class WhatsAppAccessibilityService : AccessibilityService() {
                         Log.i(TAG, "✓ Successfully clicked WhatsApp Send button!")
                         WhatsAppAutomationManager.onSendSuccess(applicationContext, this@WhatsAppAccessibilityService)
                     } else {
-                        Log.w(TAG, "First click action returned false, retrying with all clickable ancestors...")
+                        Log.w(TAG, "First click action returned false, retrying click...")
                         val retryRoot = rootInActiveWindow
-                        val retryBtn = findSendButton(retryRoot)
+                        val retryBtn = if (retryRoot != null) findSendButton(retryRoot) else null
                         if (retryBtn != null && retryBtn.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
                             Log.i(TAG, "✓ Successfully clicked WhatsApp Send button on retry!")
                             WhatsAppAutomationManager.onSendSuccess(applicationContext, this@WhatsAppAccessibilityService)
@@ -123,38 +131,65 @@ class WhatsAppAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Recursively searches for the WhatsApp Send button by View ID, Content Description, or text.
+     * Checks if the active window is an open chat conversation (has the message input box).
+     */
+    private fun isConversationWindow(root: AccessibilityNodeInfo): Boolean {
+        try {
+            val entryStd = root.findAccessibilityNodeInfosByViewId("com.whatsapp:id/entry")
+            if (entryStd != null && entryStd.isNotEmpty()) return true
+
+            val entryBiz = root.findAccessibilityNodeInfosByViewId("com.whatsapp.w4b:id/entry")
+            if (entryBiz != null && entryBiz.isNotEmpty()) return true
+        } catch (_: Exception) {}
+
+        // Fallback: check if any node has viewId ending with :id/entry
+        return findNodeByViewIdEnding(root, ":id/entry") != null
+    }
+
+    private fun findNodeByViewIdEnding(node: AccessibilityNodeInfo?, suffix: String): AccessibilityNodeInfo? {
+        if (node == null) return null
+        val id = node.viewIdResourceName ?: ""
+        if (id.endsWith(suffix, ignoreCase = true)) return node
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i)
+            val found = findNodeByViewIdEnding(child, suffix)
+            if (found != null) return found
+        }
+        return null
+    }
+
+    /**
+     * Recursively searches for the WhatsApp Send button inside an active chat.
+     * Strictly avoids FAB buttons, home screen tabs, or non-send elements.
      */
     private fun findSendButton(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
         if (node == null) return null
 
         val viewId = node.viewIdResourceName?.lowercase() ?: ""
         val desc = node.contentDescription?.toString()?.trim()?.lowercase() ?: ""
-        val text = node.text?.toString()?.trim()?.lowercase() ?: ""
 
-        val isSendId = viewId.endsWith(":id/send") ||
-                viewId.contains("send_container") ||
-                viewId.endsWith(":id/send_btn") ||
-                viewId.endsWith(":id/btn_send") ||
-                viewId.endsWith(":id/fab")
-
-        val isSendDesc = desc == "send" ||
-                desc == "পাঠান" ||
-                desc == "send message" ||
-                desc == "পাঠিয়ে দিন" ||
-                desc == "বার্তা পাঠান" ||
-                desc == "প্রেরণ" ||
-                (desc.contains("send") && !desc.contains("sender")) ||
-                desc.contains("পাঠান")
-
-        val isSendText = text == "send" || text == "পাঠান" || text.contains("send")
-
-        // Make sure it's not voice note / audio record button
+        // NEVER match the home screen floating action button (:id/fab) or voice recording buttons!
         val isVoiceNote = desc.contains("voice") || desc.contains("ভয়েস") || desc.contains("record") || viewId.contains("voice")
+        val isFab = viewId.endsWith(":id/fab") || viewId.contains("floating")
 
-        if ((isSendId || isSendDesc || isSendText) && !isVoiceNote) {
-            if (node.isClickable || node.parent?.isClickable == true) {
-                return if (node.isClickable) node else node.parent
+        if (!isVoiceNote && !isFab) {
+            val isSendId = viewId.endsWith(":id/send") ||
+                    viewId.endsWith(":id/btn_send") ||
+                    viewId.endsWith(":id/send_btn")
+
+            val isSendDesc = desc == "send" ||
+                    desc == "পাঠান" ||
+                    desc == "send message" ||
+                    desc == "পাঠিয়ে দিন" ||
+                    desc == "বার্তা পাঠান" ||
+                    desc == "প্রেরণ"
+
+            if (isSendId || isSendDesc) {
+                if (node.isClickable) {
+                    return node
+                } else if (node.parent?.isClickable == true) {
+                    return node.parent
+                }
             }
         }
 

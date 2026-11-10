@@ -62,6 +62,7 @@ object SupabaseRealtimeManager {
 
     // Track recently processed row IDs to avoid duplicate sends
     private val processedRowIds = Collections.synchronizedSet(LinkedHashSet<String>())
+    private val failureCountMap = ConcurrentHashMap<String, Int>()
     private val pendingQueue = ConcurrentLinkedQueue<PaymentQueueItem>()
 
     @Volatile
@@ -69,6 +70,7 @@ object SupabaseRealtimeManager {
 
     fun onRowSentSuccessfully(rowId: String) {
         processedRowIds.add(rowId)
+        failureCountMap.remove(rowId)
         _lastEventLog.value = "Sent successfully for row #$rowId"
     }
 
@@ -104,9 +106,13 @@ object SupabaseRealtimeManager {
         _status.value = RealtimeStatus.CONNECTING
         _lastEventLog.value = "Connecting to Supabase Realtime..."
 
-        connectWebSocket(context)
-        startPollingFallback(context)
-        startQueueProcessor(context)
+        // Seed existing rows on startup so previous test/historical records NEVER trigger WhatsApp
+        managerScope?.launch {
+            baselineExistingRows(context)
+            connectWebSocket(context)
+            startPollingFallback(context)
+            startQueueProcessor(context)
+        }
     }
 
     /**
@@ -268,15 +274,78 @@ object SupabaseRealtimeManager {
         return v
     }
 
+    private fun parseIsoTimestamp(iso: String): Long? {
+        val formats = arrayOf(
+            "yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXX",
+            "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
+            "yyyy-MM-dd'T'HH:mm:ssXXX",
+            "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+            "yyyy-MM-dd'T'HH:mm:ss'Z'",
+            "yyyy-MM-dd'T'HH:mm:ss",
+            "yyyy-MM-dd HH:mm:ss"
+        )
+        for (pattern in formats) {
+            try {
+                val sdf = java.text.SimpleDateFormat(pattern, java.util.Locale.US).apply {
+                    timeZone = java.util.TimeZone.getTimeZone("UTC")
+                }
+                val date = sdf.parse(iso)
+                if (date != null) return date.time
+            } catch (_: Exception) {}
+        }
+        return null
+    }
+
+    /**
+     * Seeds existing rows on app startup so old orders are never re-sent.
+     */
+    private fun baselineExistingRows(context: Context) {
+        try {
+            val config = PreferencesManager.getInstance(context).loadConfig()
+            if (config.supabaseUrl.isBlank() || config.supabaseApiKey.isBlank()) return
+            var baseUrl = config.supabaseUrl.trim().removeSuffix("/")
+            if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
+                baseUrl = "https://$baseUrl"
+            }
+            val table = config.supabasePaymentsTable.trim().ifEmpty { "payments" }
+            // Only baseline rows that were ALREADY SENT in Supabase so unsent/new orders are never skipped
+            val queryUrl = "$baseUrl/rest/v1/$table?whatsapp_sent=eq.true&select=id,trx_id&order=id.desc&limit=50"
+
+            val request = Request.Builder()
+                .url(queryUrl)
+                .addHeader("apikey", config.supabaseApiKey.trim())
+                .addHeader("Authorization", "Bearer ${config.supabaseApiKey.trim()}")
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            if (response.isSuccessful) {
+                val body = response.body?.string() ?: ""
+                if (body.startsWith("[")) {
+                    val array = JSONArray(body)
+                    for (i in 0 until array.length()) {
+                        val item = array.getJSONObject(i)
+                        val id = item.getCleanString("id") ?: item.getCleanString("trx_id")
+                        if (!id.isNullOrBlank()) {
+                            processedRowIds.add(id)
+                        }
+                    }
+                    Log.i(TAG, "Baselined ${array.length()} already-sent orders on startup.")
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Baseline note: ${e.message}")
+        }
+    }
+
     /**
      * Resilient Fallback Polling:
-     * Only runs when WebSocket is NOT listening, querying only confirmed orders
-     * where customer_name and whatsapp_number are non-null and whatsapp_sent is false.
+     * Queries confirmed orders where whatsapp_number is not null and whatsapp_sent is false or null.
      */
     private fun startPollingFallback(context: Context) {
         pollingJob?.cancel()
         pollingJob = managerScope?.launch {
             while (isActive && isRunning) {
+                delay(5000L)
                 try {
                     val config = PreferencesManager.getInstance(context).loadConfig()
                     if (config.whatsappAutomationEnabled && config.supabaseUrl.isNotBlank() && config.supabaseApiKey.isNotBlank()) {
@@ -286,8 +355,8 @@ object SupabaseRealtimeManager {
                         }
 
                         val table = config.supabasePaymentsTable.trim().ifEmpty { "payments" }
-                        // Query only confirmed records where whatsapp_sent is false, ordered by id descending
-                        val queryUrl = "$baseUrl/rest/v1/$table?whatsapp_sent=eq.false&order=id.desc&limit=10"
+                        // Query orders that have a WhatsApp number and haven't been sent yet (handles both false and null)
+                        val queryUrl = "$baseUrl/rest/v1/$table?whatsapp_number=not.is.null&or=(whatsapp_sent.eq.false,whatsapp_sent.is.null)&order=id.desc&limit=10"
 
                         val request = Request.Builder()
                             .url(queryUrl)
@@ -309,9 +378,8 @@ object SupabaseRealtimeManager {
                         }
                     }
                 } catch (e: Exception) {
-                    Log.d(TAG, "Continuous polling check: ${e.message}")
+                    Log.d(TAG, "Polling check: ${e.message}")
                 }
-                delay(6000L) // Resilient 6-second polling loop
             }
         }
     }
@@ -340,15 +408,33 @@ object SupabaseRealtimeManager {
                 record.optBoolean("is_sent", false)
         if (isAlreadySent) {
             processedRowIds.add(rowId)
+            prefs.markRowProcessed(rowId)
             return
         }
 
-        // 2. In-memory deduplication check (prevents re-queuing while already sent)
+        // 2. Deduplication check (prevents re-queuing while already processed in this session)
         if (processedRowIds.contains(rowId)) {
             return
         }
 
-        // 3. Status Check: Do not dispatch if explicitly marked cancelled, failed, or rejected
+        // 3. Order Age Filter: Ignore orders older than 45 minutes (checks updated_at first, then created_at)
+        val timeStr = record.getCleanString("updated_at")
+            ?: record.getCleanString("created_at")
+            ?: record.getCleanString("timestamp")
+            ?: record.getCleanString("date")
+        if (!timeStr.isNullOrBlank()) {
+            val recordTime = parseIsoTimestamp(timeStr)
+            if (recordTime != null) {
+                val ageMillis = System.currentTimeMillis() - recordTime
+                if (ageMillis > 45 * 60 * 1000L) {
+                    Log.i(TAG, "Row $rowId is old (${ageMillis / 60000} mins). Skipping automatic WhatsApp dispatch.")
+                    processedRowIds.add(rowId)
+                    return
+                }
+            }
+        }
+
+        // 4. Status Check: Do not dispatch if explicitly marked cancelled, failed, or rejected
         val statusVal = (record.getCleanString("status")
             ?: record.getCleanString("order_status")
             ?: record.getCleanString("payment_status")
@@ -359,7 +445,7 @@ object SupabaseRealtimeManager {
             return
         }
 
-        // 4. Must be a confirmed order with a valid customer WhatsApp number!
+        // 5. Must be a confirmed order with a valid customer WhatsApp number!
         // When customer has not yet confirmed order on website, whatsapp_number is null.
         val numCol = config.whatsappNumberColumn.trim().ifEmpty { "whatsapp_number" }
         val rawPhone = record.getCleanString(numCol)
@@ -378,10 +464,19 @@ object SupabaseRealtimeManager {
             return
         }
 
-        // If is_used exists in row, it must be true (meaning confirmed by customer on website)
-        if (record.has("is_used") && !record.optBoolean("is_used", false)) {
-            Log.d(TAG, "Row $rowId: Order is_used is false (unconfirmed). Skipping.")
-            return
+        // If is_used exists in row, it must be true/1 (confirmed by customer on website)
+        if (record.has("is_used") && !record.isNull("is_used")) {
+            val v = record.opt("is_used")
+            val isConfirmed = when (v) {
+                is Boolean -> v
+                is Number -> v.toInt() == 1
+                is String -> v.equals("true", true) || v.equals("t", true) || v == "1"
+                else -> true
+            }
+            if (!isConfirmed) {
+                Log.d(TAG, "Row $rowId: Order is_used is false (unconfirmed). Skipping.")
+                return
+            }
         }
 
         // 5. Prevent duplicate queueing if already in queue or currently sending
@@ -515,13 +610,23 @@ object SupabaseRealtimeManager {
                                 delay(500L)
                                 waitedMs += 500L
                             }
+
+                            if (waitedMs >= 26000L) {
+                                val fails = (failureCountMap[item.rowId] ?: 0) + 1
+                                failureCountMap[item.rowId] = fails
+                                if (fails >= 2) {
+                                    processedRowIds.add(item.rowId)
+                                    _lastEventLog.value = "Row #${item.rowId} skipped after $fails attempts"
+                                }
+                            }
+
                             pendingQueue.poll() // Remove item after completion
                             inFlightRowId = null
                             _pendingCount.value = pendingQueue.size
                             // Wait 3 seconds before attempting next queue item
                             delay(3000L)
                         } else {
-                            // If failed to launch (e.g. invalid), drop it
+                            processedRowIds.add(item.rowId)
                             pendingQueue.poll()
                             inFlightRowId = null
                             _pendingCount.value = pendingQueue.size

@@ -59,7 +59,8 @@ class PreferencesManager(context: Context) {
             whatsappSentColumn = prefs.getString("whatsapp_sent_column", "whatsapp_sent") ?: "whatsapp_sent",
             whatsappMessageTemplate = prefs.getString("whatsapp_msg_template", com.example.model.DEFAULT_VIP_WHATSAPP_TEMPLATE) ?: com.example.model.DEFAULT_VIP_WHATSAPP_TEMPLATE,
             whatsappSendDelayMs = prefs.getLong("whatsapp_send_delay_ms", 1200L),
-            whatsappAutoBack = prefs.getBoolean("whatsapp_auto_back", true)
+            whatsappAutoBack = prefs.getBoolean("whatsapp_auto_back", true),
+            preferredWhatsAppPackage = prefs.getString("preferred_whatsapp_pkg", "com.whatsapp") ?: "com.whatsapp"
         )
     }
 
@@ -119,6 +120,7 @@ class PreferencesManager(context: Context) {
             putString("whatsapp_msg_template", config.whatsappMessageTemplate)
             putLong("whatsapp_send_delay_ms", config.whatsappSendDelayMs)
             putBoolean("whatsapp_auto_back", config.whatsappAutoBack)
+            putString("preferred_whatsapp_pkg", config.preferredWhatsAppPackage.trim())
             apply()
         }
         _config.value = config
