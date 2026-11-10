@@ -102,18 +102,6 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
         </service>
-
-        <!-- Social Notification Listener for WhatsApp & Messenger Auto-Reply -->
-        <service
-            android:name=".service.SocialNotificationListenerService"
-            android:label="@string/social_bot_listener_label"
-            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.service.notification.NotificationListenerService" />
-            </intent-filter>
-        </service>
-
     </application>
 
 </manifest>

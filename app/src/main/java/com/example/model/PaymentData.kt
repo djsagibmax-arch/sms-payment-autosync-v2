@@ -91,38 +91,8 @@ data class SyncConfig(
     val whatsappSentColumn: String = "whatsapp_sent",
     val whatsappMessageTemplate: String = DEFAULT_VIP_WHATSAPP_TEMPLATE,
     val whatsappSendDelayMs: Long = 1200L,
-    val whatsappAutoBack: Boolean = true,
-
-    // AI Sales Chatbot Settings (WhatsApp & Messenger Notification Auto-Reply)
-    val chatbotEnabled: Boolean = true,
-    val chatbotWhatsAppEnabled: Boolean = true,
-    val chatbotMessengerEnabled: Boolean = true,
-    val geminiApiKey: String = "",
-    val geminiModel: String = "gemini-3.8-flash",
-    val liveChatHandoverActive: Boolean = false,
-    val chatbotAutoVerifyPayment: Boolean = true,
-    val chatbotCustomPrompt: String = DEFAULT_CHATBOT_PROMPT,
-
-    // Custom Auto-Reply Settings (Fixed/Custom text reply instead of AI)
-    val customAutoReplyEnabled: Boolean = false,
-    val customAutoReplyMessage: String = DEFAULT_CUSTOM_AUTO_REPLY_MESSAGE
+    val whatsappAutoBack: Boolean = true
 )
-
-const val DEFAULT_CUSTOM_AUTO_REPLY_MESSAGE = """আসসালামু আলাইকুম {name}!
-Technography-তে স্বাগতম। আমাদের সব প্রিমিয়াম ডিজিটাল প্রোডাক্ট, কোর্স ও ভাইরাল রিলস বান্ডেল দেখতে ভিজিট করুন:
-🌐 https://technographybd.xyz
-
-যেকোনো প্রোডাক্ট সরাসরি কিনতে বা সহযোগিতার জন্য আপনার মেসেজটি রেখে দিন, আমরা শীঘ্রই রিপ্লাই দিচ্ছি।"""
-
-const val DEFAULT_CHATBOT_PROMPT = """তুমি Technography (বাংলাদেশের প্রিমিয়াম ডিজিটাল প্রোডাক্ট স্টোর)-এর একজন অত্যন্ত ভদ্র, বন্ধুসুলভ ও পারদর্শী সেলস অ্যাসিস্ট্যান্ট।
-কাস্টমারদের সাথে সম্পূর্ণ মানুষের মতো স্বাভাবিক, মধুর ও প্রফেশনাল বাংলায় কথা বলবে।
-
-তোমার দায়িত্বসমূহ:
-১. কাস্টমারকে সালাম/অভিবাদন জানিয়ে উষ্ণভাবে স্বাগতম জানাও।
-২. আমাদের প্রোডাক্ট কালেকশন থেকে কাস্টমারের প্রয়োজন বুঝে সঠিক প্রোডাক্টটি সুন্দরভাবে সাজেস্ট কর এবং মূল্য ও বিশেষ সুবিধাসমূহ বুঝিয়ে বল।
-৩. কাস্টমার কিনতে চাইলে আমাদের পার্সোনাল বিকাশ/নগদ/রকেট নাম্বারে Send Money করতে বল এবং পেমেন্টের পর TrxID দিতে বল।
-৪. কাস্টমার কোনো TrxID দিলে তা যাচাই করে অর্ডার নিশ্চিত কর এবং নির্দিষ্ট প্রোডাক্টের VIP ডাউনলোড লিংক প্রদান কর।
-৫. কোনো অবান্তর বিষয়ে কথা না বাড়িয়ে সদাচরণ ও বিশ্বাসযোগ্যতার সাথে পণ্য বিক্রয় ও গ্রাহক সেবায় মনোযোগ দাও।"""
 
 const val DEFAULT_VIP_WHATSAPP_TEMPLATE = """অভিনন্দন! আপনার অর্ডার কনফার্ম হয়েছে
 প্রিয় {name},

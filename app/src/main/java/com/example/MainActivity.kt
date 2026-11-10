@@ -47,8 +47,6 @@ import com.example.util.KeepAliveHelper
 
 enum class AppNavTab(val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     DASHBOARD("ড্যাশবোর্ড", Icons.Default.Dashboard),
-    CHATBOT("AI চ্যাটবট", Icons.Default.SmartToy),
-    PRODUCTS("প্রোডাক্ট", Icons.Default.Inventory2),
     WHATSAPP("অটো-সেন্ড", Icons.Default.Chat),
     CONNECTION("কানেকশন", Icons.Default.CloudSync),
     WALLETS("ওয়ালেট", Icons.Default.Tune),
@@ -129,15 +127,10 @@ class MainActivity : ComponentActivity() {
             return
         }
 
-        permissionClickAttempts++
-        // On 2nd attempt or if the system refuses to show rationale (permanently denied), go straight to App Details Settings
-        val cannotShowRationale = missingPermissions.any {
-            !androidx.core.app.ActivityCompat.shouldShowRequestPermissionRationale(this, it)
-        }
-        if (permissionClickAttempts > 1 || cannotShowRationale) {
-            openAppSystemSettings()
-        } else {
+        try {
             permissionRequestLauncher.launch(missingPermissions.toTypedArray())
+        } catch (e: Exception) {
+            openAppSystemSettings()
         }
     }
 
@@ -162,7 +155,6 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         viewModel.refreshServiceState()
         viewModel.refreshWhatsAppState(this)
-        viewModel.refreshNotificationAccessState(this)
     }
 }
 
@@ -331,7 +323,6 @@ fun MainAppContent(
                 .padding(innerPadding)
         ) {
             val waState by viewModel.whatsappAutomationState.collectAsStateWithLifecycle()
-            val isNotifAccessGranted by viewModel.isNotificationAccessGranted.collectAsStateWithLifecycle()
             var isBatteryIgnored by remember {
                 mutableStateOf(KeepAliveHelper.isBatteryOptimizationIgnored(context))
             }
@@ -342,7 +333,6 @@ fun MainAppContent(
                     if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
                         hasSmsPermissions = ContextCompat.checkSelfPermission(context, Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
                         viewModel.refreshWhatsAppState(context)
-                        viewModel.refreshNotificationAccessState(context)
                         viewModel.refreshServiceState()
                         isBatteryIgnored = KeepAliveHelper.isBatteryOptimizationIgnored(context)
                     }
@@ -354,7 +344,7 @@ fun MainAppContent(
             }
 
             var isBannerDismissed by remember { mutableStateOf(false) }
-            val needsAnyPermission = !hasSmsPermissions || !isBatteryIgnored || !waState.isAccessibilityEnabled || !isNotifAccessGranted
+            val needsAnyPermission = !hasSmsPermissions || !isBatteryIgnored || !waState.isAccessibilityEnabled
             if (needsAnyPermission && !isBannerDismissed) {
                 Surface(
                     color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f),
@@ -446,24 +436,6 @@ fun MainAppContent(
                                 }
                             }
                         }
-
-                        // 4. Notification Access for Social AI Chatbot
-                        if (!isNotifAccessGranted) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("৪. সোশ্যাল চ্যাটবট নোটিফিকেশন এক্সেস", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
-                                Button(
-                                    onClick = { viewModel.openNotificationAccessSettings(context) },
-                                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryIndigo),
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
-                                ) {
-                                    Text("অনুমতি দিন", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
                     }
                 }
             }
@@ -480,15 +452,7 @@ fun MainAppContent(
                     onNavigateToConnection = { currentTab = AppNavTab.CONNECTION },
                     onNavigateToLogs = { currentTab = AppNavTab.LOGS },
                     onNavigateToSimulator = { currentTab = AppNavTab.SIMULATOR },
-                    onNavigateToWhatsApp = { currentTab = AppNavTab.WHATSAPP },
-                    onNavigateToChatbot = { currentTab = AppNavTab.CHATBOT },
-                    onNavigateToProducts = { currentTab = AppNavTab.PRODUCTS }
-                )
-                AppNavTab.CHATBOT -> ChatbotScreen(
-                    viewModel = viewModel
-                )
-                AppNavTab.PRODUCTS -> ProductsScreen(
-                    viewModel = viewModel
+                    onNavigateToWhatsApp = { currentTab = AppNavTab.WHATSAPP }
                 )
                 AppNavTab.WHATSAPP -> WhatsAppScreen(
                     viewModel = viewModel,

@@ -3,5 +3,4 @@
     <string name="full_app_name">SMS Payment AutoSync</string>
     <string name="accessibility_service_label">Auto WhatsApp Sender</string>
     <string name="accessibility_service_description">Automatically detects pre-filled payment confirmation in WhatsApp and clicks the send button on behalf of the merchant.</string>
-    <string name="social_bot_listener_label">AI Sales Chatbot Auto-Reply</string>
 </resources>

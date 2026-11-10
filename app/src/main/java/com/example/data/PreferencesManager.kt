@@ -59,19 +59,7 @@ class PreferencesManager(context: Context) {
             whatsappSentColumn = prefs.getString("whatsapp_sent_column", "whatsapp_sent") ?: "whatsapp_sent",
             whatsappMessageTemplate = prefs.getString("whatsapp_msg_template", com.example.model.DEFAULT_VIP_WHATSAPP_TEMPLATE) ?: com.example.model.DEFAULT_VIP_WHATSAPP_TEMPLATE,
             whatsappSendDelayMs = prefs.getLong("whatsapp_send_delay_ms", 1200L),
-            whatsappAutoBack = prefs.getBoolean("whatsapp_auto_back", true),
-
-            chatbotEnabled = prefs.getBoolean("chatbot_enabled", true),
-            chatbotWhatsAppEnabled = prefs.getBoolean("chatbot_wa_enabled", true),
-            chatbotMessengerEnabled = prefs.getBoolean("chatbot_fb_enabled", true),
-            geminiApiKey = prefs.getString("gemini_api_key", "") ?: "",
-            geminiModel = prefs.getString("gemini_model", "gemini-3.8-flash") ?: "gemini-3.8-flash",
-            liveChatHandoverActive = prefs.getBoolean("live_chat_handover", false),
-            chatbotAutoVerifyPayment = prefs.getBoolean("chatbot_auto_verify_payment", true),
-            chatbotCustomPrompt = prefs.getString("chatbot_custom_prompt", com.example.model.DEFAULT_CHATBOT_PROMPT) ?: com.example.model.DEFAULT_CHATBOT_PROMPT,
-
-            customAutoReplyEnabled = prefs.getBoolean("custom_auto_reply_enabled", false),
-            customAutoReplyMessage = prefs.getString("custom_auto_reply_message", com.example.model.DEFAULT_CUSTOM_AUTO_REPLY_MESSAGE) ?: com.example.model.DEFAULT_CUSTOM_AUTO_REPLY_MESSAGE
+            whatsappAutoBack = prefs.getBoolean("whatsapp_auto_back", true)
         )
     }
 
@@ -131,18 +119,6 @@ class PreferencesManager(context: Context) {
             putString("whatsapp_msg_template", config.whatsappMessageTemplate)
             putLong("whatsapp_send_delay_ms", config.whatsappSendDelayMs)
             putBoolean("whatsapp_auto_back", config.whatsappAutoBack)
-
-            putBoolean("chatbot_enabled", config.chatbotEnabled)
-            putBoolean("chatbot_wa_enabled", config.chatbotWhatsAppEnabled)
-            putBoolean("chatbot_fb_enabled", config.chatbotMessengerEnabled)
-            putString("gemini_api_key", config.geminiApiKey.trim())
-            putString("gemini_model", config.geminiModel)
-            putBoolean("live_chat_handover", config.liveChatHandoverActive)
-            putBoolean("chatbot_auto_verify_payment", config.chatbotAutoVerifyPayment)
-            putString("chatbot_custom_prompt", config.chatbotCustomPrompt)
-
-            putBoolean("custom_auto_reply_enabled", config.customAutoReplyEnabled)
-            putString("custom_auto_reply_message", config.customAutoReplyMessage)
             apply()
         }
         _config.value = config

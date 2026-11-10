@@ -16,8 +16,6 @@ import com.example.network.NetworkManager
 import com.example.network.NetworkResult
 import com.example.parser.SmsParser
 import com.example.service.SyncForegroundService
-import com.example.service.GeminiCallResult
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -25,7 +23,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 data class DashboardStats(
     val totalCount: Int = 0,
@@ -47,14 +44,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val recentLogs: StateFlow<List<SyncLogEntity>> = dao.getRecentLogs()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val products: StateFlow<List<com.example.data.ProductEntity>> = db.productDao().getAllProducts()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val botActivities = com.example.service.SocialNotificationListenerService.recentBotActivities
-
-    private val _isNotificationAccessGranted = MutableStateFlow(false)
-    val isNotificationAccessGranted: StateFlow<Boolean> = _isNotificationAccessGranted.asStateFlow()
 
     val stats: StateFlow<DashboardStats> = combine(
         dao.getTotalCount(),
@@ -133,100 +122,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _userMessage.value = "Launching WhatsApp intent for test..."
         } else {
             _userMessage.value = "Test failed. Check phone number & WhatsApp installation."
-        }
-    }
-
-    fun refreshNotificationAccessState(context: Context) {
-        _isNotificationAccessGranted.value = com.example.service.SocialNotificationListenerService.isNotificationAccessGranted(context)
-    }
-
-    fun openNotificationAccessSettings(context: Context) {
-        com.example.service.SocialNotificationListenerService.openNotificationAccessSettings(context)
-    }
-
-    fun saveProduct(product: com.example.data.ProductEntity) {
-        viewModelScope.launch {
-            db.productDao().insertProduct(product)
-            _userMessage.value = "Product saved: ${product.name}"
-        }
-    }
-
-    fun deleteProduct(productId: String) {
-        viewModelScope.launch {
-            db.productDao().deleteProductById(productId)
-            _userMessage.value = "Product removed"
-        }
-    }
-
-    fun toggleProductActive(product: com.example.data.ProductEntity) {
-        viewModelScope.launch {
-            val updated = product.copy(isActive = !product.isActive)
-            db.productDao().updateProduct(updated)
-            _userMessage.value = if (updated.isActive) "Product activated" else "Product deactivated"
-        }
-    }
-
-    fun pauseBotForSender(senderKey: String, minutes: Int = 15) {
-        com.example.service.SocialNotificationListenerService.pauseAutoReplyForSender(senderKey, minutes)
-        _userMessage.value = "Bot paused for $senderKey for $minutes mins"
-    }
-
-    fun resumeBotForSender(senderKey: String) {
-        com.example.service.SocialNotificationListenerService.resumeAutoReplyForSender(senderKey)
-        _userMessage.value = "Bot resumed for $senderKey"
-    }
-
-    fun clearBotActivities() {
-        com.example.service.SocialNotificationListenerService.clearBotActivities()
-        _userMessage.value = "বট অ্যাক্টিভিটি হিস্টোরি ক্লিয়ার করা হয়েছে"
-    }
-
-    fun testChatbotReply(context: Context, query: String, customConfig: SyncConfig? = null, onResult: (String) -> Unit) {
-        viewModelScope.launch {
-            val currentCfg = customConfig ?: config.value
-            val db = AppDatabase.getDatabase(context)
-            val products = db.productDao().getActiveProductsList().ifEmpty {
-                AppDatabase.getDefaultProducts()
-            }
-
-            // If user explicitly activated Custom Auto-Reply mode, test that custom template
-            if (currentCfg.customAutoReplyEnabled) {
-                val customText = currentCfg.customAutoReplyMessage
-                    .replace("{name}", "Test Customer")
-                    .replace("{sender}", "Test Customer")
-                    .replace("{platform}", "WhatsApp")
-                    .replace("{message}", query)
-                onResult("📌 [কাস্টমাইজ অটোমেশন রিপ্লাই]\n$customText")
-                return@launch
-            }
-
-            // Strictly test Gemini AI API
-            if (currentCfg.geminiApiKey.isBlank()) {
-                onResult("⚠️ [Gemini API Key সেট করা নেই]\nঅনুগ্রহ করে উপরে আপনার Gemini API Key দিয়ে সেভ করুন। ডিফল্টভাবে কোনো মোবাইল বট মেসেজ কাস্টমারকে পাঠানো হবে না।")
-                return@launch
-            }
-
-            val result = com.example.service.GeminiSalesAssistant.callGeminiApiDetailed(
-                config = currentCfg,
-                customerName = "Test Customer",
-                message = query,
-                products = products
-            )
-
-            if (result.isSuccess) {
-                onResult("✨ [Gemini 3 AI সফল • ${result.modelUsed} (${result.latencyMs}ms)]\n${result.replyText}")
-            } else {
-                onResult("❌ [Gemini API এরর]\n${result.errorMessage}\n\nদয়া করে নিশ্চিত করুন আপনার API Key সক্রিয় রয়েছে। কোনো অফলাইন মোবাইল বট মেসেজ দেওয়া হয়নি।")
-            }
-        }
-    }
-
-    fun testGeminiConnection(apiKey: String, model: String, onResult: (com.example.service.GeminiCallResult) -> Unit) {
-        viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                com.example.service.GeminiSalesAssistant.testGeminiPing(apiKey, model)
-            }
-            onResult(result)
         }
     }
 
