@@ -191,7 +191,7 @@ class SyncForegroundService : Service() {
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setAutoCancel(false)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
 
@@ -207,7 +207,7 @@ class SyncForegroundService : Service() {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "SMS Background Monitor (24/7)",
-                NotificationManager.IMPORTANCE_DEFAULT
+                NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Keeps the SMS payment listener active non-stop in the background"
                 setShowBadge(false)

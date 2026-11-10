@@ -197,6 +197,25 @@ fun DashboardScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = PrimaryIndigo.copy(alpha = 0.08f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Default.Lock, contentDescription = null, tint = PrimaryIndigo, modifier = Modifier.size(18.dp))
+                            Text(
+                                text = "রিসেন্ট অ্যাপসে (Recent Apps) অ্যাপটির উপরে থাকা তালার আইকনে (Lock icon 🔒) ট্যাপ করে লক রাখুন। এতে 'Close all' চাপলেও নোটিফিকেশন শাটারবার থেকে কখনো কাটবে না।",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)

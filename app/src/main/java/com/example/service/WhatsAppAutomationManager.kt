@@ -8,6 +8,7 @@ import android.view.accessibility.AccessibilityManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.PowerManager
 import android.provider.Settings
 import android.text.TextUtils
 import android.util.Log
@@ -240,6 +241,22 @@ object WhatsAppAutomationManager {
         }
 
         try {
+            // Wake up screen if turned off so WhatsApp window can display and be clicked by AccessibilityService
+            try {
+                val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                if (powerManager != null && !powerManager.isInteractive) {
+                    @Suppress("DEPRECATION")
+                    val wakeLock = powerManager.newWakeLock(
+                        PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE,
+                        "SmsAutoSync:ScreenWakeUpLock"
+                    )
+                    wakeLock.acquire(12000L)
+                    Log.i(TAG, "Acquired WakeLock to wake up display for WhatsApp send.")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Screen wakeup note: ${e.message}")
+            }
+
             val encodedMessage = URLEncoder.encode(message, "UTF-8")
             val uri = Uri.parse("https://api.whatsapp.com/send?phone=$sanitizedPhone&text=$encodedMessage")
 
@@ -255,7 +272,7 @@ object WhatsAppAutomationManager {
             }
 
             val intent = Intent(Intent.ACTION_VIEW, uri).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NO_USER_ACTION
                 if (targetPackage != null) {
                     setPackage(targetPackage)
                 }
